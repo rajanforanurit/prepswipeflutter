@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:prepswipe/models/news.dart';
 import 'package:prepswipe/utils/app_theme.dart';
 import '../services/newsapi_service.dart';
+import 'currentnews_screen.dart';
 
 class OpenNewsScreen extends StatefulWidget {
   const OpenNewsScreen({super.key});
@@ -22,10 +23,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
 
   String _selectedCategory = 'All';
   List<NewsModel> _newsList = [];
-  List<NewsModel> _currentAffairsList = [];
-
   bool _isLoadingNews = false;
-  bool _isLoadingCurrentAffairs = false;
 
   Timer? _refreshTimer;
 
@@ -35,25 +33,13 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _tabController.addListener(_onTabChanged);
     _loadNews();
-    _loadCurrentAffairs();
 
     _refreshTimer = Timer.periodic(const Duration(minutes: 5), (timer) {
       if (_tabController.index == 0) {
         _loadNews();
-      } else {
-        _loadCurrentAffairs();
       }
     });
-  }
-
-  void _onTabChanged() {
-    if (!_tabController.indexIsChanging) {
-      if (_tabController.index == 1 && _currentAffairsList.isEmpty) {
-        _loadCurrentAffairs();
-      }
-    }
   }
 
   Future<void> _loadNews() async {
@@ -71,41 +57,18 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
     }
   }
 
-  Future<void> _loadCurrentAffairs() async {
-    setState(() => _isLoadingCurrentAffairs = true);
-    try {
-      final news = await _newsApiService.getCurrentAffairs(
-        category: _selectedCategory,
-      );
-      if (!mounted) return;
-      setState(() {
-        _currentAffairsList = news;
-        _isLoadingCurrentAffairs = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoadingCurrentAffairs = false);
-    }
-  }
-
   void _onCategorySelected(String category) {
     setState(() => _selectedCategory = category);
     _loadNews();
-    _loadCurrentAffairs();
   }
 
-  Future<void> _refreshCurrent() async {
-    if (_tabController.index == 0) {
-      await _loadNews();
-    } else {
-      await _loadCurrentAffairs();
-    }
+  Future<void> _refreshNews() async {
+    await _loadNews();
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
-    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     super.dispose();
   }
@@ -128,10 +91,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                     list: _newsList,
                     isLoading: _isLoadingNews,
                   ),
-                  _buildNewsList(
-                    list: _currentAffairsList,
-                    isLoading: _isLoadingCurrentAffairs,
-                  ),
+                  const CurrentNewsScreen(),
                 ],
               ),
             ),
@@ -153,10 +113,10 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                   text: 'Prep',
                   style: TextStyle(
                     fontFamily: 'SpaceGrotesk',
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
                     color: Colors.white,
-                    letterSpacing: -1.0,
+                    letterSpacing: -0.5,
                     height: 1.0,
                   ),
                 ),
@@ -164,10 +124,10 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                   text: 'Swipe',
                   style: TextStyle(
                     fontFamily: 'SpaceGrotesk',
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
                     color: Color(0xFFFFD700),
-                    letterSpacing: -1.0,
+                    letterSpacing: -0.5,
                     height: 1.0,
                   ),
                 ),
@@ -284,7 +244,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
     return RefreshIndicator(
       color: AppColors.primary,
       backgroundColor: AppColors.surface,
-      onRefresh: _refreshCurrent,
+      onRefresh: _refreshNews,
       child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         itemCount: list.length,
@@ -297,7 +257,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
     return RefreshIndicator(
       color: AppColors.primary,
       backgroundColor: AppColors.surface,
-      onRefresh: _refreshCurrent,
+      onRefresh: _refreshNews,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
