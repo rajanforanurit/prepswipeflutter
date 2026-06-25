@@ -8,6 +8,7 @@ import 'providers/auth_provider.dart';
 import 'providers/quiz_provider.dart';
 import 'providers/analytics_provider.dart';
 import 'screens/main_shell.dart';
+import 'screens/login_screen.dart';
 import 'utils/app_theme.dart';
 
 Future<void> main() async {
@@ -57,6 +58,10 @@ class _AppRoot extends StatelessWidget {
 
     if (auth.isLoading) {
       return const _SplashScreen();
+    }
+
+    if (!auth.isAuthenticated) {
+      return const LoginPage();
     }
 
     return const MainShell();

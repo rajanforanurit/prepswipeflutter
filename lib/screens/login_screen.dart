@@ -7,23 +7,6 @@ import '../utils/app_theme.dart';
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
-  static Future<void> show(BuildContext context) {
-    return Navigator.of(context, rootNavigator: true).push(
-      PageRouteBuilder(
-        opaque: true,
-        fullscreenDialog: true,
-        pageBuilder: (_, __, ___) => const LoginPage(),
-        transitionsBuilder: (_, animation, __, child) {
-          return FadeTransition(
-            opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
-            child: child,
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 320),
-      ),
-    );
-  }
-
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
@@ -69,12 +52,7 @@ class _LoginPageState extends State<LoginPage>
       final success =
           await context.read<AuthProvider>().signInWithGoogle(context);
       if (!mounted) return;
-      if (success) {
-        final navigator = Navigator.of(context, rootNavigator: true);
-        if (navigator.canPop()) {
-          navigator.pop();
-        }
-      } else {
+      if (!success) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Sign in cancelled.',
