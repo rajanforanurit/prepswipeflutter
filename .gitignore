@@ -1,0 +1,54 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub/
+build/
+
+# Flutter generated
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-versions
+.generated/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Android
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# Keystore (IMPORTANT)
+*.jks
+*.keystore
+key.properties
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# macOS
+macos/Pods/
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.*
+
+# Firebase
+google-services.json
+GoogleService-Info.plist
+
+# Coverage
+coverage/
+
+# Misc
+.DS_Store
+Thumbs.db

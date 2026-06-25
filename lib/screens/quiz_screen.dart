@@ -1,0 +1,953 @@
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:flutter_card_swiper/flutter_card_swiper.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart';
+import '../providers/auth_provider.dart';
+import '../providers/quiz_provider.dart';
+import '../providers/analytics_provider.dart';
+import '../models/question_model.dart';
+import '../widgets/ps_card.dart';
+import '../services/api_service.dart';
+
+class QuizColors {
+  static const primary = Color(0xFF7C4DFF);
+  static const secondary = Color(0xFFFF9F1C);
+  static const background = Color(0xFF090C14);
+  static const card = Color(0xFF161B2C);
+  static const cardBorder = Color(0x1FFFFFFF);
+  static const textPrimary = Colors.white;
+  static const textSecondary = Color(0xFFB4B8C5);
+  static const textTertiary = Color(0xFF7A7F91);
+  static const success = Color(0xFF22C55E);
+  static const error = Color(0xFFEF4444);
+}
+
+class SwipeLimiter {
+  static const _kCountKey = 'swipe_limiter_count';
+  static const _kWindowStartKey = 'swipe_limiter_window_start';
+  static const int maxSwipes = 15;
+  static const Duration window = Duration(hours: 3);
+
+  static Future<int> getCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    await _resetIfExpired(prefs);
+    return prefs.getInt(_kCountKey) ?? 0;
+  }
+
+  static Future<Duration?> getTimeRemaining() async {
+    final prefs = await SharedPreferences.getInstance();
+    final startMillis = prefs.getInt(_kWindowStartKey);
+    if (startMillis == null) return null;
+    final start = DateTime.fromMillisecondsSinceEpoch(startMillis);
+    final elapsed = DateTime.now().difference(start);
+    final remaining = window - elapsed;
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  static Future<int> increment() async {
+    final prefs = await SharedPreferences.getInstance();
+    await _resetIfExpired(prefs);
+
+    final hasWindow = prefs.containsKey(_kWindowStartKey);
+    if (!hasWindow) {
+      await prefs.setInt(
+          _kWindowStartKey, DateTime.now().millisecondsSinceEpoch);
+    }
+
+    final current = prefs.getInt(_kCountKey) ?? 0;
+    final updated = current + 1;
+    await prefs.setInt(_kCountKey, updated);
+    return updated;
+  }
+
+  static Future<bool> hasReachedLimit() async {
+    final count = await getCount();
+    return count >= maxSwipes;
+  }
+
+  static Future<void> _resetIfExpired(SharedPreferences prefs) async {
+    final startMillis = prefs.getInt(_kWindowStartKey);
+    if (startMillis == null) return;
+    final start = DateTime.fromMillisecondsSinceEpoch(startMillis);
+    if (DateTime.now().difference(start) >= window) {
+      await prefs.remove(_kCountKey);
+      await prefs.remove(_kWindowStartKey);
+    }
+  }
+}
+
+class QuizScreen extends StatefulWidget {
+  const QuizScreen({super.key});
+
+  @override
+  State<QuizScreen> createState() => _QuizScreenState();
+}
+
+class _QuizScreenState extends State<QuizScreen> {
+  final CardSwiperController _swiperController = CardSwiperController();
+
+  int _swipeCount = 0;
+  bool _limitReached = false;
+  Duration? _timeRemaining;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ensureLoaded();
+      _loadSwipeState();
+    });
+  }
+
+  Future<void> _loadSwipeState() async {
+    final count = await SwipeLimiter.getCount();
+    final remaining = await SwipeLimiter.getTimeRemaining();
+    if (!mounted) return;
+    setState(() {
+      _swipeCount = count;
+      _limitReached = count >= SwipeLimiter.maxSwipes;
+      _timeRemaining = remaining;
+    });
+  }
+
+  Future<void> _ensureLoaded() async {
+    if (!mounted) return;
+    final quiz = context.read<QuizProvider>();
+    if (quiz.state == QuizState.idle || quiz.questions.isEmpty) {
+      final auth = context.read<AuthProvider>();
+      final exam = auth.userProfile?.examType ?? 'UPSC';
+      await quiz.loadQuestions(exam);
+    }
+  }
+
+  bool _onSwipe(
+    int previousIndex,
+    int? currentIndex,
+    CardSwiperDirection direction,
+  ) {
+    if (_limitReached) return false;
+
+    context
+        .read<QuizProvider>()
+        .navigateToQuestion(currentIndex ?? previousIndex);
+
+    SwipeLimiter.increment().then((updated) {
+      if (!mounted) return;
+      setState(() {
+        _swipeCount = updated;
+        _limitReached = updated >= SwipeLimiter.maxSwipes;
+      });
+      if (_limitReached) {
+        SwipeLimiter.getTimeRemaining().then((remaining) {
+          if (!mounted) return;
+          setState(() => _timeRemaining = remaining);
+        });
+      }
+    });
+
+    return true;
+  }
+
+  void _showLimitSheet() {
+    final remaining = _timeRemaining;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _SwipeLimitSheet(timeRemaining: remaining),
+    );
+  }
+
+  @override
+  void dispose() {
+    _swiperController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final quiz = context.watch<QuizProvider>();
+
+    return Scaffold(
+      backgroundColor: QuizColors.background,
+      body: switch (quiz.state) {
+        QuizState.idle ||
+        QuizState.loading when quiz.questions.isEmpty =>
+          const PSLoader(message: 'Loading questions…'),
+        QuizState.error when quiz.questions.isEmpty => _ErrorView(
+            message: quiz.error ?? 'Something went wrong',
+            onRetry: () {
+              final auth = context.read<AuthProvider>();
+              final exam = auth.userProfile?.examType ?? 'UPSC';
+              quiz.loadQuestions(exam, refresh: true);
+            },
+          ),
+        _ => SafeArea(
+            child: Stack(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: CardSwiper(
+                    controller: _swiperController,
+                    cardsCount: quiz.questions.length,
+                    numberOfCardsDisplayed: quiz.questions.length >= 2 ? 2 : 1,
+                    isLoop: false,
+                    allowedSwipeDirection:
+                        const AllowedSwipeDirection.only(up: true, down: true),
+                    backCardOffset: const Offset(0, 28),
+                    padding: EdgeInsets.zero,
+                    onSwipe: _onSwipe,
+                    cardBuilder: (
+                      context,
+                      index,
+                      percentThresholdX,
+                      percentThresholdY,
+                    ) {
+                      return _QuestionCard(
+                        question: quiz.questions[index],
+                        questionIndex: index,
+                      );
+                    },
+                  ),
+                ),
+                if (_limitReached) _LimitOverlay(onTap: _showLimitSheet),
+              ],
+            ),
+          ),
+      },
+    );
+  }
+}
+
+class _QuestionCard extends StatefulWidget {
+  final Question question;
+  final int questionIndex;
+
+  const _QuestionCard({
+    required this.question,
+    required this.questionIndex,
+  });
+
+  @override
+  State<_QuestionCard> createState() => _QuestionCardState();
+}
+
+class _QuestionCardState extends State<_QuestionCard> {
+  bool _isSaved = false;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkBookmarkStatus();
+  }
+
+  Future<void> _checkBookmarkStatus() async {
+    try {
+      final bookmarks = await ApiService().getBookmarks();
+      if (!mounted) return;
+      final alreadySaved = bookmarks.any((bm) {
+        final q = bm['question'];
+        if (q == null) return false;
+        return q['_id']?.toString() == widget.question.id?.toString();
+      });
+      setState(() => _isSaved = alreadySaved);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleSave() async {
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
+
+    try {
+      if (_isSaved) {
+        await ApiService().removeBookmark(
+          questionId: widget.question.id,
+        );
+        if (mounted) {
+          setState(() => _isSaved = false);
+          _showSnack('Removed from saved');
+        }
+      } else {
+        await ApiService().addBookmark(
+          questionId: widget.question.id,
+        );
+        if (mounted) {
+          setState(() => _isSaved = true);
+          _showSnack('Question saved!');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnack('Could not save question');
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 13,
+            color: Colors.white,
+          ),
+        ),
+        backgroundColor: QuizColors.card,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  void _onExplain() {
+    _showSnack('Explanation coming soon!');
+  }
+
+  Future<void> _onShare() async {
+    final q = widget.question;
+    final correctOpt = q.options[q.correctAnswer.toString()] ?? '';
+    final shareText = '''🎯 *PrepSwipe Quiz*
+
+📘 *${q.exam} ${q.year}* | ${q.subject}${q.topic != null ? ' › ${q.topic}' : ''}
+
+❓ ${q.questionText}
+
+${q.optionList.map((o) => '${o.key}. ${o.value}').join('\n')}
+
+✅ *Answer: ${q.correctAnswer}. $correctOpt*
+
+Practice more PYQs on PrepSwipe 👇
+https://play.google.com/store/apps/details?id=com.anuritinnovation.prepswipe''';
+
+    await Share.share(shareText,
+        subject: 'PrepSwipe – ${q.exam} ${q.year} Question');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final quiz = context.watch<QuizProvider>();
+    final selected = quiz.selectedOptionFor(widget.questionIndex);
+    final submitted = quiz.isSubmitted(widget.questionIndex);
+
+    return Stack(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: Container(
+              constraints: const BoxConstraints(minHeight: double.infinity),
+              decoration: BoxDecoration(
+                color: QuizColors.card.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: QuizColors.primary.withValues(alpha: 0.12),
+                    blurRadius: 28,
+                    spreadRadius: -8,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 20, 64, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        PSBadge(
+                            label: widget.question.year.toString(),
+                            color: QuizColors.secondary),
+                        PSBadge(
+                            label: widget.question.subject,
+                            color: QuizColors.textSecondary),
+                        if (widget.question.topic != null)
+                          PSBadge(
+                              label: widget.question.topic!,
+                              color: QuizColors.textSecondary),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      widget.question.questionText,
+                      style: const TextStyle(
+                        fontFamily: 'Poppins',
+                        fontSize: 16,
+                        fontWeight: FontWeight.w400,
+                        color: QuizColors.textPrimary,
+                        height: 1.6,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ...widget.question.optionList.map((opt) {
+                      final optKey = int.tryParse(opt.key) ?? 0;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _OptionTile(
+                          optionKey: optKey,
+                          optionLabel: opt.key,
+                          optionText: opt.value,
+                          selected: selected == optKey,
+                          submitted: submitted,
+                          isCorrect: widget.question.correctAnswer == optKey,
+                          onTap: submitted
+                              ? null
+                              : () => context
+                                  .read<QuizProvider>()
+                                  .selectOption(widget.questionIndex, optKey),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 6),
+                    if (!submitted) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        child: PSButton(
+                          label: 'Submit Answer',
+                          icon: Icons.check_rounded,
+                          color: selected == null
+                              ? QuizColors.textTertiary
+                              : QuizColors.primary,
+                          onTap: selected == null
+                              ? null
+                              : () => _submit(context, widget.questionIndex),
+                        ),
+                      ),
+                    ] else ...[
+                      _ResultCard(
+                        isCorrect: selected == widget.question.correctAnswer,
+                        correctAnswer:
+                            '${widget.question.correctAnswer}. ${widget.question.options[widget.question.correctAnswer.toString()] ?? ''}',
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          right: 10,
+          top: 0,
+          bottom: 0,
+          child: Center(
+            child: _CardActionBar(
+              isSaved: _isSaved,
+              isSaving: _isSaving,
+              onSave: _toggleSave,
+              onExplain: _onExplain,
+              onShare: _onShare,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _submit(BuildContext context, int index) async {
+    await context.read<QuizProvider>().submitQuestion(index);
+    context.read<AnalyticsProvider>().invalidate();
+  }
+}
+
+class _CardActionBar extends StatelessWidget {
+  final bool isSaved;
+  final bool isSaving;
+  final VoidCallback onSave;
+  final VoidCallback onExplain;
+  final VoidCallback onShare;
+
+  const _CardActionBar({
+    required this.isSaved,
+    required this.isSaving,
+    required this.onSave,
+    required this.onExplain,
+    required this.onShare,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ActionButton(
+          icon:
+              isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+          label: 'Save',
+          iconColor: isSaved ? QuizColors.primary : QuizColors.textSecondary,
+          isLoading: isSaving,
+          onTap: onSave,
+        ),
+        const SizedBox(height: 20),
+        _ActionButton(
+          icon: Icons.help_outline_rounded,
+          label: 'Explain',
+          iconColor: QuizColors.textSecondary,
+          onTap: onExplain,
+        ),
+        const SizedBox(height: 20),
+        _ActionButton(
+          icon: Icons.share_rounded,
+          label: 'Share',
+          iconColor: QuizColors.textSecondary,
+          onTap: onShare,
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color iconColor;
+  final bool isLoading;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.iconColor,
+    required this.onTap,
+    this.isLoading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: isLoading ? null : onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 40,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            isLoading
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: QuizColors.primary,
+                    ),
+                  )
+                : Icon(icon, color: iconColor, size: 26),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+                color: QuizColors.textTertiary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OptionTile extends StatelessWidget {
+  final int optionKey;
+  final String optionLabel;
+  final String optionText;
+  final bool selected;
+  final bool submitted;
+  final bool isCorrect;
+  final VoidCallback? onTap;
+
+  const _OptionTile({
+    required this.optionKey,
+    required this.optionLabel,
+    required this.optionText,
+    required this.selected,
+    required this.submitted,
+    required this.isCorrect,
+    this.onTap,
+  });
+
+  Color _bgColor() {
+    if (!submitted) {
+      return selected
+          ? QuizColors.primary.withValues(alpha: 0.10)
+          : Colors.white.withValues(alpha: 0.03);
+    }
+    if (isCorrect) return QuizColors.success.withValues(alpha: 0.10);
+    if (selected && !isCorrect) return QuizColors.error.withValues(alpha: 0.10);
+    return Colors.white.withValues(alpha: 0.03);
+  }
+
+  Color _borderColor() {
+    if (!submitted) {
+      return selected ? QuizColors.primary : QuizColors.cardBorder;
+    }
+    if (isCorrect) return QuizColors.success;
+    if (selected && !isCorrect) return QuizColors.error;
+    return QuizColors.cardBorder;
+  }
+
+  Color _labelColor() {
+    if (!submitted) {
+      return selected ? QuizColors.primary : QuizColors.textSecondary;
+    }
+    if (isCorrect) return QuizColors.success;
+    if (selected && !isCorrect) return QuizColors.error;
+    return QuizColors.textTertiary;
+  }
+
+  Widget? _trailingIcon() {
+    if (!submitted) return null;
+    if (isCorrect) {
+      return const Icon(Icons.check_circle_rounded,
+          color: QuizColors.success, size: 20);
+    }
+    if (selected && !isCorrect) {
+      return const Icon(Icons.cancel_rounded,
+          color: QuizColors.error, size: 20);
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: _bgColor(),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _borderColor(), width: 1.5),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: _labelColor().withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  optionLabel,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: _labelColor(),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(
+                  optionText,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
+                    color: submitted && !isCorrect && !selected
+                        ? QuizColors.textTertiary
+                        : QuizColors.textPrimary,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ),
+            if (_trailingIcon() != null) ...[
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: _trailingIcon()!,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ResultCard extends StatelessWidget {
+  final bool isCorrect;
+  final String correctAnswer;
+
+  const _ResultCard({required this.isCorrect, required this.correctAnswer});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isCorrect ? QuizColors.success : QuizColors.error;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.35), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isCorrect ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                color: color,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                isCorrect ? 'Correct! 🎉' : 'Incorrect',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+          if (!isCorrect) ...[
+            const SizedBox(height: 10),
+            const Text(
+              'CORRECT ANSWER',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: QuizColors.textSecondary,
+                letterSpacing: 0.6,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              correctAnswer,
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+                color: QuizColors.textPrimary,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LimitOverlay extends StatelessWidget {
+  final VoidCallback onTap;
+  const _LimitOverlay({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: GestureDetector(
+        onTap: onTap,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: QuizColors.background.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: QuizColors.secondary.withValues(alpha: 0.14),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.lock_clock_rounded,
+                            color: QuizColors.secondary, size: 28),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Daily limit reached',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontFamily: 'Poppins',
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          color: QuizColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Tap to see when more questions unlock',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 13,
+                          color: QuizColors.textSecondary,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SwipeLimitSheet extends StatefulWidget {
+  final Duration? timeRemaining;
+  const _SwipeLimitSheet({required this.timeRemaining});
+
+  @override
+  State<_SwipeLimitSheet> createState() => _SwipeLimitSheetState();
+}
+
+class _SwipeLimitSheetState extends State<_SwipeLimitSheet> {
+  late Duration? _remaining = widget.timeRemaining;
+
+  @override
+  Widget build(BuildContext context) {
+    final remaining = _remaining ?? Duration.zero;
+    final hours = remaining.inHours;
+    final minutes = remaining.inMinutes % 60;
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+          decoration: BoxDecoration(
+            color: QuizColors.card.withValues(alpha: 0.92),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.08),
+              width: 1,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: QuizColors.cardBorder,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'You\'ve hit today\'s free limit',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: QuizColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'You\'ve answered ${SwipeLimiter.maxSwipes} questions. '
+                'More unlock in $hours h $minutes m, or upgrade to keep going now.',
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 14,
+                  color: QuizColors.textSecondary,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: PSButton(
+                  label: 'Upgrade for unlimited access',
+                  icon: Icons.workspace_premium_rounded,
+                  color: QuizColors.secondary,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text(
+                    'Got it',
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontWeight: FontWeight.w600,
+                      color: QuizColors.textTertiary,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+
+  const _ErrorView({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return PSEmptyState(
+      icon: Icons.wifi_off_rounded,
+      title: 'Failed to load questions',
+      subtitle: message,
+      action: PSButton(
+        label: 'Retry',
+        icon: Icons.refresh_rounded,
+        onTap: onRetry,
+      ),
+    );
+  }
+}
