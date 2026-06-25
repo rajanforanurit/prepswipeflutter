@@ -150,8 +150,6 @@ class _LoginPageState extends State<LoginPage>
                         const Spacer(flex: 1),
                         _buildGoogleButton(),
                         const SizedBox(height: 20),
-                        _buildFootnote(),
-                        const Spacer(flex: 1),
                       ],
                     ),
                   ),
@@ -290,19 +288,6 @@ class _LoginPageState extends State<LoginPage>
                   ),
                 ],
               ),
-      ),
-    );
-  }
-
-  Widget _buildFootnote() {
-    return const Text(
-      'By continuing you agree to our Terms & Privacy Policy',
-      textAlign: TextAlign.center,
-      style: TextStyle(
-        fontFamily: 'SpaceGrotesk',
-        fontSize: 11.5,
-        color: Colors.white38,
-        height: 1.5,
       ),
     );
   }

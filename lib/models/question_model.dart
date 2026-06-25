@@ -18,6 +18,7 @@ class Question {
   final int correctAnswer;
   final double marks;
   final double negativeMarks;
+  final String? explanation;
   final String? batchId;
 
   const Question({
@@ -33,6 +34,7 @@ class Question {
     required this.correctAnswer,
     this.marks = 2,
     this.negativeMarks = 0.66,
+    this.explanation,
     this.batchId,
   });
 
@@ -57,6 +59,7 @@ class Question {
       correctAnswer: (json['correct_answer'] as num?)?.toInt() ?? 1,
       marks: (json['marks'] as num?)?.toDouble() ?? 2.0,
       negativeMarks: (json['negativeMarks'] as num?)?.toDouble() ?? 0.66,
+      explanation: json['explanation']?.toString(),
       batchId: json['batchId']?.toString(),
     );
   }
