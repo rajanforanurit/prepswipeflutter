@@ -22,7 +22,7 @@ class _MainShellState extends State<MainShell> {
     const HomeScreen(),
     const FeedScreen(),
     const RevisionScreen(),
-    const NewsScreen(),
+    const OpenNewsScreen(),
     const ProfileScreen(),
   ];
 
