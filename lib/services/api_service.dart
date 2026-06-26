@@ -328,4 +328,124 @@ class ApiService {
       throw Exception('Failed to remove bookmark: ${res.statusCode}');
     }
   }
+
+  // ── Current Affairs ────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getCurrentAffairs({
+    String? subject,
+    String? date,
+    String? search,
+    int limit = 20,
+    int skip = 0,
+  }) async {
+    final token = await _getToken();
+    final uri = Uri.parse('${AppConstants.baseUrl}/current-affairs').replace(
+      queryParameters: {
+        if (subject != null) 'subject': subject,
+        if (date != null) 'date': date,
+        if (search != null) 'search': search,
+        'limit': limit.toString(),
+        'skip': skip.toString(),
+      },
+    );
+
+    final res = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to fetch current affairs: ${res.statusCode}');
+  }
+
+  Future<Map<String, dynamic>> getCurrentAffairById(String id) async {
+    final token = await _getToken();
+    final res = await http
+        .get(
+          Uri.parse('${AppConstants.baseUrl}/current-affairs/$id'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to fetch current affair: ${res.statusCode}');
+  }
+
+  Future<List<String>> getCurrentAffairsSubjects() async {
+    final token = await _getToken();
+    final res = await http
+        .get(
+          Uri.parse('${AppConstants.baseUrl}/current-affairs/subjects'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      return List<String>.from(data['subjects'] ?? []);
+    }
+    throw Exception('Failed to fetch CA subjects: ${res.statusCode}');
+  }
+
+  // ── Important Topics ───────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getImportantTopics({
+    String? subject,
+    String? search,
+    int limit = 20,
+    int skip = 0,
+  }) async {
+    final token = await _getToken();
+    final uri = Uri.parse('${AppConstants.baseUrl}/important-topics').replace(
+      queryParameters: {
+        if (subject != null) 'subject': subject,
+        if (search != null) 'search': search,
+        'limit': limit.toString(),
+        'skip': skip.toString(),
+      },
+    );
+
+    final res = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to fetch important topics: ${res.statusCode}');
+  }
+
+  Future<Map<String, dynamic>> getImportantTopicById(String id) async {
+    final token = await _getToken();
+    final res = await http
+        .get(
+          Uri.parse('${AppConstants.baseUrl}/important-topics/$id'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to fetch important topic: ${res.statusCode}');
+  }
+
+  Future<List<String>> getImportantTopicsSubjects() async {
+    final token = await _getToken();
+    final res = await http
+        .get(
+          Uri.parse('${AppConstants.baseUrl}/important-topics/subjects'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      return List<String>.from(data['subjects'] ?? []);
+    }
+    throw Exception('Failed to fetch IT subjects: ${res.statusCode}');
+  }
 }
