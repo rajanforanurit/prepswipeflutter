@@ -9,6 +9,7 @@ const Map<String, Color> _subjectColors = {
   'History': Color(0xFFDC2626),
   'Science': Color(0xFF7C3AED),
   'Economy': Color(0xFFEA580C),
+  'Economics': Color(0xFFEA580C),
   'Current Affairs': Color(0xFF475569),
   'Art & Culture': Color(0xFF92400E),
   'Agriculture': Color(0xFF059669),
@@ -65,7 +66,7 @@ class _FeedScreenState extends State<FeedScreen> {
         _api.getImportantTopics(limit: 20),
         _api.getCurrentAffairs(limit: 20),
         _api.getDidYouKnow(limit: 20),
-        _api.getRandomTodayInPast(count: 10),
+        _api.getTodayInPastToday(),
       ]);
 
       final importantTopics =
@@ -74,8 +75,27 @@ class _FeedScreenState extends State<FeedScreen> {
           List<Map<String, dynamic>>.from((results[1] as Map)['data'] ?? []);
       final didYouKnow =
           List<Map<String, dynamic>>.from((results[2] as Map)['data'] ?? []);
-      final todayInHistory =
-          List<Map<String, dynamic>>.from(results[3] as List);
+
+      final todayRaw = results[3] as Map<String, dynamic>;
+      final todayItems =
+          List<Map<String, dynamic>>.from(todayRaw['data'] ?? []);
+
+      final Map<String, List<Map<String, dynamic>>> tipBySubject = {};
+      for (final item in todayItems) {
+        final subject = item['subject'] as String? ?? 'General';
+        tipBySubject.putIfAbsent(subject, () => []).add(item);
+      }
+
+      final List<Map<String, dynamic>> todayInHistory =
+          tipBySubject.entries.map((entry) {
+        return {
+          'subject': entry.key,
+          'date': entry.value.isNotEmpty
+              ? (entry.value.first['date'] as String? ?? '')
+              : '',
+          'events': entry.value,
+        };
+      }).toList();
 
       _buildCardList(
           importantTopics, currentAffairs, didYouKnow, todayInHistory);
@@ -244,6 +264,7 @@ class _VerticalFeedState extends State<_VerticalFeed> {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           child: GestureDetector(
             onTap: () => _toggleFlip(index),
+            behavior: HitTestBehavior.opaque,
             child: _FlipCard(
               flipped: flipped,
               front: _buildFront(card, index),
@@ -703,7 +724,7 @@ class _ITFrontCard extends StatelessWidget {
                           color: accent.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: Text(
+                        child: const Text(
                           '📚',
                           style: TextStyle(fontSize: 42),
                         ),
@@ -796,6 +817,7 @@ class _ITBackCard extends StatelessWidget {
                             ),
                           )
                         : ListView.separated(
+                            physics: const ClampingScrollPhysics(),
                             padding: EdgeInsets.zero,
                             itemCount: points.length,
                             separatorBuilder: (_, __) =>
@@ -873,9 +895,9 @@ class _CAFrontCard extends StatelessWidget {
                         const SizedBox(height: 4),
                       ],
                       const Spacer(),
-                      Text(
+                      const Text(
                         '📰',
-                        style: const TextStyle(fontSize: 36),
+                        style: TextStyle(fontSize: 36),
                       ),
                       const SizedBox(height: 16),
                       Text(
@@ -895,7 +917,7 @@ class _CAFrontCard extends StatelessWidget {
                         const SizedBox(height: 12),
                         Text(
                           overview,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontFamily: 'SpaceGrotesk',
                             fontSize: 13,
                             color: AppColors.textSecondary,
@@ -984,6 +1006,7 @@ class _CABackCard extends StatelessWidget {
                             ),
                           )
                         : ListView.separated(
+                            physics: const ClampingScrollPhysics(),
                             padding: EdgeInsets.zero,
                             itemCount: highlights.length,
                             separatorBuilder: (_, __) =>
@@ -1011,7 +1034,7 @@ class _DYKFrontCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final subject = data['subject'] as String? ?? '';
-    final title = data['title'] as String? ?? data['fact'] as String? ?? '';
+    final question = data['question'] as String? ?? '';
     final accent = _colorForSubject(subject);
 
     return _CardShell(
@@ -1053,10 +1076,10 @@ class _DYKFrontCard extends StatelessWidget {
                         ],
                       ),
                       const Spacer(),
-                      Text('💡', style: const TextStyle(fontSize: 42)),
+                      const Text('💡', style: TextStyle(fontSize: 42)),
                       const SizedBox(height: 20),
                       Text(
-                        title,
+                        question,
                         style: const TextStyle(
                           fontFamily: 'SpaceGrotesk',
                           fontSize: 22,
@@ -1065,7 +1088,7 @@ class _DYKFrontCard extends StatelessWidget {
                           letterSpacing: -0.3,
                           height: 1.3,
                         ),
-                        maxLines: 5,
+                        maxLines: 6,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const Spacer(),
@@ -1089,12 +1112,9 @@ class _DYKBackCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final subject = data['subject'] as String? ?? '';
-    final title = data['title'] as String? ?? data['fact'] as String? ?? '';
-    final explanation =
-        data['explanation'] as String? ?? data['description'] as String? ?? '';
-    final keyFacts =
-        List<String>.from(data['keyFacts'] ?? data['points'] ?? []);
-    final examRelevance = data['examRelevance'] as String? ?? '';
+    final question = data['question'] as String? ?? '';
+    final answer = data['answer'] as String? ?? '';
+    final explanation = data['explanation'] as String? ?? '';
     final accent = _colorForSubject(subject);
 
     return _CardShell(
@@ -1121,72 +1141,64 @@ class _DYKBackCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    title,
-                    style: const TextStyle(
+                    question,
+                    style: TextStyle(
                       fontFamily: 'SpaceGrotesk',
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                      letterSpacing: -0.2,
-                      height: 1.35,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary,
+                      letterSpacing: -0.1,
+                      height: 1.4,
                     ),
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 14),
                   Expanded(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (explanation.isNotEmpty) ...[
-                            _SectionLabel(label: 'EXPLANATION', color: accent),
-                            const SizedBox(height: 8),
-                            Text(
-                              explanation,
+                    child: ListView(
+                      physics: const ClampingScrollPhysics(),
+                      padding: EdgeInsets.zero,
+                      children: [
+                        if (answer.isNotEmpty) ...[
+                          _SectionLabel(label: 'ANSWER', color: accent),
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: accent.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: accent.withValues(alpha: 0.28)),
+                            ),
+                            child: Text(
+                              answer,
                               style: TextStyle(
                                 fontFamily: 'SpaceGrotesk',
-                                fontSize: 13,
-                                color: AppColors.textSecondary,
-                                height: 1.55,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary,
+                                height: 1.45,
                               ),
                             ),
-                            const SizedBox(height: 14),
-                          ],
-                          if (keyFacts.isNotEmpty) ...[
-                            _SectionLabel(label: 'KEY FACTS', color: accent),
-                            const SizedBox(height: 8),
-                            ...keyFacts.map((f) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: _BulletPoint(text: f, color: accent),
-                                )),
-                            const SizedBox(height: 6),
-                          ],
-                          if (examRelevance.isNotEmpty) ...[
-                            _SectionLabel(
-                                label: 'EXAM RELEVANCE', color: accent),
-                            const SizedBox(height: 8),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: accent.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                    color: accent.withValues(alpha: 0.2)),
-                              ),
-                              child: Text(
-                                examRelevance,
-                                style: TextStyle(
-                                  fontFamily: 'SpaceGrotesk',
-                                  fontSize: 12,
-                                  color: AppColors.textPrimary,
-                                  height: 1.5,
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
+                          const SizedBox(height: 16),
                         ],
-                      ),
+                        if (explanation.isNotEmpty) ...[
+                          _SectionLabel(label: 'EXPLANATION', color: accent),
+                          const SizedBox(height: 8),
+                          Text(
+                            explanation,
+                            style: TextStyle(
+                              fontFamily: 'SpaceGrotesk',
+                              fontSize: 13,
+                              color: AppColors.textSecondary,
+                              height: 1.55,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                      ],
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -1205,12 +1217,39 @@ class _TIPFrontCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _TIPFrontCard({required this.data});
 
+  String _formatDate(String mmdd) {
+    if (mmdd.length < 5) return mmdd;
+    const months = [
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
+    final parts = mmdd.split('-');
+    if (parts.length < 2) return mmdd;
+    final month = int.tryParse(parts[0]) ?? 0;
+    final day = int.tryParse(parts[1]) ?? 0;
+    if (month < 1 || month > 12) return mmdd;
+    return '${months[month]} $day';
+  }
+
   @override
   Widget build(BuildContext context) {
     final subject = data['subject'] as String? ?? '';
-    final title = data['title'] as String? ?? '';
-    final date = data['date'] as String? ?? data['year'] as String? ?? '';
+    final date = data['date'] as String? ?? '';
+    final events = List<Map<String, dynamic>>.from(data['events'] ?? []);
     final accent = _colorForSubject(subject.isEmpty ? 'History' : subject);
+    final formattedDate = _formatDate(date);
+    final eventCount = events.length;
 
     return _CardShell(
       accent: accent,
@@ -1226,6 +1265,18 @@ class _TIPFrontCard extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: accent.withValues(alpha: 0.05),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -40,
+            left: -40,
+            child: Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: 0.04),
               ),
             ),
           ),
@@ -1246,28 +1297,38 @@ class _TIPFrontCard extends StatelessWidget {
                               label: 'Today in History',
                               color: accent),
                           const Spacer(),
-                          if (subject.isNotEmpty)
-                            _SubjectBadge(subject: subject, color: accent),
+                          if (formattedDate.isNotEmpty)
+                            _DateBadge(date: formattedDate, color: accent),
                         ],
                       ),
                       const SizedBox(height: 8),
-                      if (date.isNotEmpty)
-                        _DateBadge(date: date, color: accent),
+                      if (subject.isNotEmpty)
+                        _SubjectBadge(subject: subject, color: accent),
                       const Spacer(),
-                      Text('🕰️', style: const TextStyle(fontSize: 42)),
+                      const Text('🕰️', style: TextStyle(fontSize: 42)),
                       const SizedBox(height: 20),
                       Text(
-                        title,
+                        'This Day in $subject',
                         style: const TextStyle(
                           fontFamily: 'SpaceGrotesk',
-                          fontSize: 22,
+                          fontSize: 26,
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary,
-                          letterSpacing: -0.3,
-                          height: 1.3,
+                          letterSpacing: -0.5,
+                          height: 1.25,
                         ),
-                        maxLines: 5,
-                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        eventCount == 1
+                            ? '1 historical event on $formattedDate'
+                            : '$eventCount historical events on $formattedDate',
+                        style: TextStyle(
+                          fontFamily: 'SpaceGrotesk',
+                          fontSize: 13,
+                          color: AppColors.textSecondary,
+                          height: 1.4,
+                        ),
                       ),
                       const Spacer(),
                       _TapToSee(color: accent),
@@ -1287,17 +1348,38 @@ class _TIPBackCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _TIPBackCard({required this.data});
 
+  String _formatDate(String mmdd) {
+    if (mmdd.length < 5) return mmdd;
+    const months = [
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
+    final parts = mmdd.split('-');
+    if (parts.length < 2) return mmdd;
+    final month = int.tryParse(parts[0]) ?? 0;
+    final day = int.tryParse(parts[1]) ?? 0;
+    if (month < 1 || month > 12) return mmdd;
+    return '${months[month]} $day';
+  }
+
   @override
   Widget build(BuildContext context) {
     final subject = data['subject'] as String? ?? '';
-    final title = data['title'] as String? ?? '';
-    final date = data['date'] as String? ?? data['year'] as String? ?? '';
-    final description =
-        data['description'] as String? ?? data['overview'] as String? ?? '';
-    final points = List<String>.from(
-        data['points'] ?? data['highlights'] ?? data['keyPoints'] ?? []);
-    final significance = data['significance'] as String? ?? '';
+    final date = data['date'] as String? ?? '';
+    final events = List<Map<String, dynamic>>.from(data['events'] ?? []);
     final accent = _colorForSubject(subject.isEmpty ? 'History' : subject);
+    final formattedDate = _formatDate(date);
 
     return _CardShell(
       accent: accent,
@@ -1319,78 +1401,81 @@ class _TIPBackCard extends StatelessWidget {
                           label: 'Today in History',
                           color: accent),
                       const Spacer(),
-                      if (date.isNotEmpty)
-                        _DateBadge(date: date, color: accent),
+                      if (formattedDate.isNotEmpty)
+                        _DateBadge(date: formattedDate, color: accent),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontFamily: 'SpaceGrotesk',
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                      letterSpacing: -0.2,
-                      height: 1.35,
-                    ),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  const SizedBox(height: 4),
+                  if (subject.isNotEmpty)
+                    _SubjectBadge(subject: subject, color: accent),
                   const SizedBox(height: 14),
+                  _SectionLabel(
+                      label: 'EVENTS ON $formattedDate', color: accent),
+                  const SizedBox(height: 12),
                   Expanded(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (description.isNotEmpty) ...[
-                            _SectionLabel(label: 'OVERVIEW', color: accent),
-                            const SizedBox(height: 8),
-                            Text(
-                              description,
+                    child: events.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No events found for today',
                               style: TextStyle(
                                 fontFamily: 'SpaceGrotesk',
                                 fontSize: 13,
                                 color: AppColors.textSecondary,
-                                height: 1.55,
                               ),
                             ),
-                            const SizedBox(height: 14),
-                          ],
-                          if (points.isNotEmpty) ...[
-                            _SectionLabel(label: 'KEY FACTS', color: accent),
-                            const SizedBox(height: 8),
-                            ...points.map((p) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: _BulletPoint(text: p, color: accent),
-                                )),
-                            const SizedBox(height: 6),
-                          ],
-                          if (significance.isNotEmpty) ...[
-                            _SectionLabel(label: 'SIGNIFICANCE', color: accent),
-                            const SizedBox(height: 8),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: accent.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                    color: accent.withValues(alpha: 0.2)),
-                              ),
-                              child: Text(
-                                significance,
-                                style: const TextStyle(
-                                  fontFamily: 'SpaceGrotesk',
-                                  fontSize: 12,
-                                  color: AppColors.textPrimary,
-                                  height: 1.5,
-                                ),
-                              ),
+                          )
+                        : ListView.separated(
+                            physics: const ClampingScrollPhysics(),
+                            padding: EdgeInsets.zero,
+                            itemCount: events.length,
+                            separatorBuilder: (_, __) => Divider(
+                              color: accent.withValues(alpha: 0.15),
+                              height: 20,
+                              thickness: 1,
                             ),
-                          ],
-                        ],
-                      ),
-                    ),
+                            itemBuilder: (_, i) {
+                              final event = events[i];
+                              final year = event['year']?.toString() ?? '';
+                              final eventText = event['event'] as String? ?? '';
+                              return Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (year.isNotEmpty)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: accent.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        year,
+                                        style: TextStyle(
+                                          fontFamily: 'SpaceGrotesk',
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: accent,
+                                        ),
+                                      ),
+                                    ),
+                                  if (year.isNotEmpty)
+                                    const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      eventText,
+                                      style: const TextStyle(
+                                        fontFamily: 'SpaceGrotesk',
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w400,
+                                        color: AppColors.textPrimary,
+                                        height: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
                   ),
                   const SizedBox(height: 12),
                   _TapToFlipBack(color: accent),
