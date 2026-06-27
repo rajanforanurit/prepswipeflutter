@@ -28,7 +28,7 @@ class QuizColors {
 class SwipeLimiter {
   static const _kCountKey = 'swipe_limiter_count';
   static const _kWindowStartKey = 'swipe_limiter_window_start';
-  static const int maxSwipes = 30; // Swipe/question limit increased to 30
+  static const int maxSwipes = 30;
   static const Duration window = Duration(hours: 3);
 
   static Future<int> getCount() async {
@@ -208,6 +208,7 @@ class _QuizScreenState extends State<QuizScreen> {
                           numberOfCardsDisplayed:
                               quiz.questions.length >= 2 ? 2 : 1,
                           isLoop: false,
+                          isDisabled: false,
                           allowedSwipeDirection:
                               const AllowedSwipeDirection.only(
                                   up: true, down: true),
@@ -265,7 +266,7 @@ class _CompactHeader extends StatelessWidget {
                   text: 'Prep',
                   style: TextStyle(
                     fontFamily: 'SpaceGrotesk',
-                    fontSize: 13.5, // was 18
+                    fontSize: 13.5,
                     fontWeight: FontWeight.w700,
                     color: Colors.white,
                     letterSpacing: -0.5,
@@ -276,7 +277,7 @@ class _CompactHeader extends StatelessWidget {
                   text: 'Swipe',
                   style: TextStyle(
                     fontFamily: 'SpaceGrotesk',
-                    fontSize: 13.5, // was 18
+                    fontSize: 13.5,
                     fontWeight: FontWeight.w700,
                     color: QuizColors.gold,
                     letterSpacing: -0.5,
@@ -300,7 +301,7 @@ class _CompactHeader extends StatelessWidget {
               examType,
               style: const TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 9.0, // was 12
+                fontSize: 9.0,
                 fontWeight: FontWeight.w600,
                 color: QuizColors.primary,
                 letterSpacing: 0.3,
@@ -439,7 +440,7 @@ class _QuestionCardState extends State<_QuestionCard>
           message,
           style: const TextStyle(
             fontFamily: 'Inter',
-            fontSize: 9.75, // was 13
+            fontSize: 9.75,
             color: Colors.white,
           ),
         ),
@@ -512,9 +513,6 @@ class _QuestionCardState extends State<_QuestionCard>
                   ),
                 ],
               ),
-              // Use LayoutBuilder so the card fills the swiper slot fully,
-              // then give the scrollable content an exact bounded height.
-              // This prevents SingleChildScrollView from fighting the swiper.
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   return _ScrollableCardContent(
@@ -605,6 +603,27 @@ class _QuestionCardState extends State<_QuestionCard>
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// THE CORE FIX
+//
+// Problem: flutter_card_swiper uses onPanUpdate (a GestureDetector) to move
+// the card. SingleChildScrollView ALSO registers a vertical drag recognizer.
+// They fight in the gesture arena — and the scroll always wins on long cards
+// because it gets priority as an inner widget.
+//
+// Solution: Use a raw Listener widget (pointer events, NOT the gesture arena)
+// to intercept touch events BEFORE the gesture system. On every PointerMove:
+//   1. If there is no scrollable overflow → do nothing → swiper handles it
+//   2. If scrolling mid-content → manually drive ScrollController.jumpTo()
+//      and mark this touch as "claimed by scroll" so swiper gets nothing
+//   3. If at top edge AND dragging down → let swiper win (previous card)
+//   4. If at bottom edge AND dragging up → let swiper win (next card)
+//
+// Because Listener is below the arena, it can intercept and absorb events
+// without interfering when not needed. We use a simple bool flag per pointer
+// to track intent once decided on the first move of each gesture.
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _ScrollableCardContent extends StatefulWidget {
   final Question question;
   final int questionIndex;
@@ -627,13 +646,12 @@ class _ScrollableCardContent extends StatefulWidget {
 }
 
 class _ScrollableCardContentState extends State<_ScrollableCardContent> {
-  late ScrollController _scrollController;
+  final ScrollController _scrollController = ScrollController();
 
-  @override
-  void initState() {
-    super.initState();
-    _scrollController = ScrollController();
-  }
+  // Per-gesture state — reset on every PointerDown
+  bool _gestureClaimedByScroll = false;
+
+  static const double _kDragThreshold = 5.0;
 
   @override
   void dispose() {
@@ -641,91 +659,168 @@ class _ScrollableCardContentState extends State<_ScrollableCardContent> {
     super.dispose();
   }
 
+  bool get _hasOverflow {
+    if (!_scrollController.hasClients) return false;
+    return _scrollController.position.maxScrollExtent > 0.0;
+  }
+
+  bool get _isAtTop {
+    if (!_scrollController.hasClients) return true;
+    return _scrollController.position.pixels <=
+        _scrollController.position.minScrollExtent + 1.0;
+  }
+
+  bool get _isAtBottom {
+    if (!_scrollController.hasClients) return true;
+    return _scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 1.0;
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    _gestureClaimedByScroll = false;
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    final dy = event.delta.dy;
+
+    // No scrollable content at all — let the swiper handle everything
+    if (!_hasOverflow) return;
+
+    // Already decided for this gesture: keep scrolling
+    if (_gestureClaimedByScroll) {
+      _scrollBy(-dy);
+      return;
+    }
+
+    // Not yet decided. Only act on meaningful movement.
+    if (dy.abs() < _kDragThreshold) return;
+
+    final draggingUp =
+        dy < 0; // finger moving up = scroll down (show more below)
+    final draggingDown =
+        dy > 0; // finger moving down = scroll up (show more above)
+
+    // At top edge and trying to scroll further up (drag down) → give to swiper
+    if (draggingDown && _isAtTop) return;
+
+    // At bottom edge and trying to scroll further down (drag up) → give to swiper
+    if (draggingUp && _isAtBottom) return;
+
+    // We are mid-scroll or scrolling toward content — claim it
+    _gestureClaimedByScroll = true;
+    _scrollBy(-dy);
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    _gestureClaimedByScroll = false;
+  }
+
+  void _onPointerCancel(PointerCancelEvent event) {
+    _gestureClaimedByScroll = false;
+  }
+
+  void _scrollBy(double delta) {
+    if (!_scrollController.hasClients) return;
+    final newOffset = (_scrollController.offset + delta).clamp(
+      _scrollController.position.minScrollExtent,
+      _scrollController.position.maxScrollExtent,
+    );
+    _scrollController.jumpTo(newOffset);
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Constrain the scroll view to the card's exact height so the swiper's
-    // gesture arena always wins outside the scrollable area. The
-    // scroll view only intercepts vertical drags when content overflows —
-    // and even then, it propagates events up once it reaches the boundaries,
-    // letting the card swiper take over and complete the swipe.
-    return SizedBox(
-      height: widget.maxHeight,
-      child: SingleChildScrollView(
-        controller: _scrollController,
-        physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 20, 64, 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                PSBadge(
-                    label: widget.question.year.toString(),
-                    color: QuizColors.secondary),
-                PSBadge(
-                    label: widget.question.subject,
-                    color: QuizColors.textSecondary),
-                if (widget.question.topic != null)
+    return Listener(
+      onPointerDown: _onPointerDown,
+      onPointerMove: _onPointerMove,
+      onPointerUp: _onPointerUp,
+      onPointerCancel: _onPointerCancel,
+      // HitTestBehavior.translucent: we receive events AND pass them through
+      // to children (so taps on options/buttons still work)
+      behavior: HitTestBehavior.translucent,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: widget.maxHeight),
+        child: SingleChildScrollView(
+          controller: _scrollController,
+          // NeverScrollableScrollPhysics: disables the scroll widget's own
+          // gesture handling entirely. We drive it manually via jumpTo above.
+          // This is critical — without this, both Listener AND the scroll
+          // widget respond to the same touch, causing jitter/conflict.
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(20, 20, 64, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
                   PSBadge(
-                      label: widget.question.topic!,
+                      label: widget.question.year.toString(),
+                      color: QuizColors.secondary),
+                  PSBadge(
+                      label: widget.question.subject,
                       color: QuizColors.textSecondary),
+                  if (widget.question.topic != null)
+                    PSBadge(
+                        label: widget.question.topic!,
+                        color: QuizColors.textSecondary),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                widget.question.questionText,
+                style: const TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 12.0,
+                  fontWeight: FontWeight.w400,
+                  color: QuizColors.textPrimary,
+                  height: 1.6,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ...widget.question.optionList.map((opt) {
+                final optKey = int.tryParse(opt.key) ?? 0;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _OptionTile(
+                    optionKey: optKey,
+                    optionLabel: opt.key,
+                    optionText: opt.value,
+                    selected: widget.selected == optKey,
+                    submitted: widget.submitted,
+                    isCorrect: widget.question.correctAnswer == optKey,
+                    onTap: widget.submitted
+                        ? null
+                        : () => context
+                            .read<QuizProvider>()
+                            .selectOption(widget.questionIndex, optKey),
+                  ),
+                );
+              }),
+              const SizedBox(height: 6),
+              if (!widget.submitted) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: PSButton(
+                    label: 'Submit Answer',
+                    icon: Icons.check_rounded,
+                    color: widget.selected == null
+                        ? QuizColors.textTertiary
+                        : QuizColors.primary,
+                    onTap: widget.selected == null ? null : widget.onSubmit,
+                  ),
+                ),
+              ] else ...[
+                _ResultCard(
+                  isCorrect: widget.selected == widget.question.correctAnswer,
+                  correctAnswer:
+                      '${widget.question.correctAnswer}. ${widget.question.options[widget.question.correctAnswer.toString()] ?? ''}',
+                ),
               ],
-            ),
-            const SizedBox(height: 14),
-            Text(
-              widget.question.questionText,
-              style: const TextStyle(
-                fontFamily: 'Poppins',
-                fontSize: 12.0, // was 16
-                fontWeight: FontWeight.w400,
-                color: QuizColors.textPrimary,
-                height: 1.6,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ...widget.question.optionList.map((opt) {
-              final optKey = int.tryParse(opt.key) ?? 0;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _OptionTile(
-                  optionKey: optKey,
-                  optionLabel: opt.key,
-                  optionText: opt.value,
-                  selected: widget.selected == optKey,
-                  submitted: widget.submitted,
-                  isCorrect: widget.question.correctAnswer == optKey,
-                  onTap: widget.submitted
-                      ? null
-                      : () => context
-                          .read<QuizProvider>()
-                          .selectOption(widget.questionIndex, optKey),
-                ),
-              );
-            }),
-            const SizedBox(height: 6),
-            if (!widget.submitted) ...[
-              SizedBox(
-                width: double.infinity,
-                child: PSButton(
-                  label: 'Submit Answer',
-                  icon: Icons.check_rounded,
-                  color: widget.selected == null
-                      ? QuizColors.textTertiary
-                      : QuizColors.primary,
-                  onTap: widget.selected == null ? null : widget.onSubmit,
-                ),
-              ),
-            ] else ...[
-              _ResultCard(
-                isCorrect: widget.selected == widget.question.correctAnswer,
-                correctAnswer:
-                    '${widget.question.correctAnswer}. ${widget.question.options[widget.question.correctAnswer.toString()] ?? ''}',
-              ),
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -756,7 +851,7 @@ class _ExplanationPanel extends StatelessWidget {
                   'Explanation',
                   style: TextStyle(
                     fontFamily: 'Poppins',
-                    fontSize: 12.0, // was 16
+                    fontSize: 12.0,
                     fontWeight: FontWeight.w600,
                     color: QuizColors.textPrimary,
                   ),
@@ -794,7 +889,7 @@ class _ExplanationPanel extends StatelessWidget {
                     explanation!,
                     style: const TextStyle(
                       fontFamily: 'Inter',
-                      fontSize: 10.5, // was 14
+                      fontSize: 10.5,
                       fontWeight: FontWeight.w400,
                       color: QuizColors.textSecondary,
                       height: 1.6,
@@ -809,7 +904,7 @@ class _ExplanationPanel extends StatelessWidget {
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontFamily: 'Inter',
-                        fontSize: 10.5, // was 14
+                        fontSize: 10.5,
                         fontWeight: FontWeight.w400,
                         color: QuizColors.textTertiary,
                         height: 1.5,
@@ -845,7 +940,7 @@ class _ExplanationPanel extends StatelessWidget {
                       'Next Question',
                       style: TextStyle(
                         fontFamily: 'Inter',
-                        fontSize: 10.5, // was 14
+                        fontSize: 10.5,
                         fontWeight: FontWeight.w600,
                         color: QuizColors.primary,
                       ),
@@ -954,7 +1049,7 @@ class _ActionButton extends StatelessWidget {
               label,
               style: const TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 7.5, // was 10
+                fontSize: 7.5,
                 fontWeight: FontWeight.w500,
                 color: QuizColors.textTertiary,
               ),
@@ -1055,7 +1150,7 @@ class _OptionTile extends StatelessWidget {
                   optionLabel,
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 9.0, // was 12
+                    fontSize: 9.0,
                     fontWeight: FontWeight.w700,
                     color: _labelColor(),
                   ),
@@ -1070,7 +1165,7 @@ class _OptionTile extends StatelessWidget {
                   optionText,
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 10.5, // was 14
+                    fontSize: 10.5,
                     fontWeight: FontWeight.w400,
                     color: submitted && !isCorrect && !selected
                         ? QuizColors.textTertiary
@@ -1125,7 +1220,7 @@ class _ResultCard extends StatelessWidget {
                 isCorrect ? 'Correct! 🎉' : 'Incorrect',
                 style: TextStyle(
                   fontFamily: 'Poppins',
-                  fontSize: 12.0, // was 16
+                  fontSize: 12.0,
                   fontWeight: FontWeight.w700,
                   color: color,
                 ),
@@ -1138,7 +1233,7 @@ class _ResultCard extends StatelessWidget {
               'CORRECT ANSWER',
               style: TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 8.25, // was 11
+                fontSize: 8.25,
                 fontWeight: FontWeight.w600,
                 color: QuizColors.textSecondary,
                 letterSpacing: 0.6,
@@ -1149,7 +1244,7 @@ class _ResultCard extends StatelessWidget {
               correctAnswer,
               style: const TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 10.5, // was 14
+                fontSize: 10.5,
                 fontWeight: FontWeight.w400,
                 color: QuizColors.textPrimary,
                 height: 1.4,
@@ -1203,7 +1298,7 @@ class _LimitOverlay extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontFamily: 'Poppins',
-                          fontSize: 12.75, // was 17
+                          fontSize: 12.75,
                           fontWeight: FontWeight.w700,
                           color: QuizColors.textPrimary,
                         ),
@@ -1214,7 +1309,7 @@ class _LimitOverlay extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontFamily: 'Inter',
-                          fontSize: 9.75, // was 13
+                          fontSize: 9.75,
                           color: QuizColors.textSecondary,
                           height: 1.4,
                         ),
@@ -1281,7 +1376,7 @@ class _SwipeLimitSheetState extends State<_SwipeLimitSheet> {
                 'You\'ve hit today\'s free limit',
                 style: TextStyle(
                   fontFamily: 'Poppins',
-                  fontSize: 13.5, // was 18
+                  fontSize: 13.5,
                   fontWeight: FontWeight.w700,
                   color: QuizColors.textPrimary,
                 ),
@@ -1292,7 +1387,7 @@ class _SwipeLimitSheetState extends State<_SwipeLimitSheet> {
                 'More unlock in $hours h $minutes m, or upgrade to keep going now.',
                 style: const TextStyle(
                   fontFamily: 'Inter',
-                  fontSize: 10.5, // was 14
+                  fontSize: 10.5,
                   color: QuizColors.textSecondary,
                   height: 1.5,
                 ),
