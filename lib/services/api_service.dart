@@ -329,8 +329,6 @@ class ApiService {
     }
   }
 
-  // ── Current Affairs ────────────────────────────────────────────────────────
-
   Future<Map<String, dynamic>> getCurrentAffairs({
     String? subject,
     String? date,
@@ -390,8 +388,6 @@ class ApiService {
     throw Exception('Failed to fetch CA subjects: ${res.statusCode}');
   }
 
-  // ── Important Topics ───────────────────────────────────────────────────────
-
   Future<Map<String, dynamic>> getImportantTopics({
     String? subject,
     String? search,
@@ -447,5 +443,184 @@ class ApiService {
       return List<String>.from(data['subjects'] ?? []);
     }
     throw Exception('Failed to fetch IT subjects: ${res.statusCode}');
+  }
+
+  Future<Map<String, dynamic>> getDidYouKnow({
+    String? subject,
+    String? search,
+    int limit = 20,
+    int skip = 0,
+  }) async {
+    final token = await _getToken();
+    final uri = Uri.parse('${AppConstants.baseUrl}/did-you-know').replace(
+      queryParameters: {
+        if (subject != null) 'subject': subject,
+        if (search != null) 'search': search,
+        'limit': limit.toString(),
+        'skip': skip.toString(),
+      },
+    );
+
+    final res = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to fetch did you know: ${res.statusCode}');
+  }
+
+  Future<List<Map<String, dynamic>>> getRandomDidYouKnow({
+    String? subject,
+    int count = 1,
+  }) async {
+    final token = await _getToken();
+    final uri =
+        Uri.parse('${AppConstants.baseUrl}/did-you-know/random').replace(
+      queryParameters: {
+        if (subject != null) 'subject': subject,
+        'count': count.toString(),
+      },
+    );
+
+    final res = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      return List<Map<String, dynamic>>.from(data['data'] ?? []);
+    }
+    throw Exception('Failed to fetch random did you know: ${res.statusCode}');
+  }
+
+  Future<Map<String, dynamic>> getDidYouKnowById(String id) async {
+    final token = await _getToken();
+    final res = await http
+        .get(
+          Uri.parse('${AppConstants.baseUrl}/did-you-know/$id'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to fetch did you know item: ${res.statusCode}');
+  }
+
+  Future<List<String>> getDidYouKnowSubjects() async {
+    final token = await _getToken();
+    final res = await http
+        .get(
+          Uri.parse('${AppConstants.baseUrl}/did-you-know/subjects'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      return List<String>.from(data['subjects'] ?? []);
+    }
+    throw Exception('Failed to fetch DYK subjects: ${res.statusCode}');
+  }
+
+  Future<Map<String, dynamic>> getTodayInPast({
+    String? subject,
+    String? date,
+    String? search,
+    int limit = 20,
+    int skip = 0,
+  }) async {
+    final token = await _getToken();
+    final uri = Uri.parse('${AppConstants.baseUrl}/today-in-past').replace(
+      queryParameters: {
+        if (subject != null) 'subject': subject,
+        if (date != null) 'date': date,
+        if (search != null) 'search': search,
+        'limit': limit.toString(),
+        'skip': skip.toString(),
+      },
+    );
+
+    final res = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to fetch today in past: ${res.statusCode}');
+  }
+
+  Future<Map<String, dynamic>> getTodayInPastToday() async {
+    final token = await _getToken();
+    final res = await http
+        .get(
+          Uri.parse('${AppConstants.baseUrl}/today-in-past/today'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to fetch today in past (today): ${res.statusCode}');
+  }
+
+  Future<List<Map<String, dynamic>>> getRandomTodayInPast({
+    String? subject,
+    int count = 5,
+  }) async {
+    final token = await _getToken();
+    final uri =
+        Uri.parse('${AppConstants.baseUrl}/today-in-past/random').replace(
+      queryParameters: {
+        if (subject != null) 'subject': subject,
+        'count': count.toString(),
+      },
+    );
+
+    final res = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      return List<Map<String, dynamic>>.from(data['data'] ?? []);
+    }
+    throw Exception('Failed to fetch random today in past: ${res.statusCode}');
+  }
+
+  Future<Map<String, dynamic>> getTodayInPastById(String id) async {
+    final token = await _getToken();
+    final res = await http
+        .get(
+          Uri.parse('${AppConstants.baseUrl}/today-in-past/$id'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to fetch today in past item: ${res.statusCode}');
+  }
+
+  Future<List<String>> getTodayInPastSubjects() async {
+    final token = await _getToken();
+    final res = await http
+        .get(
+          Uri.parse('${AppConstants.baseUrl}/today-in-past/subjects'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      return List<String>.from(data['subjects'] ?? []);
+    }
+    throw Exception('Failed to fetch TIP subjects: ${res.statusCode}');
   }
 }

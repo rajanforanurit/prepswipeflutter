@@ -28,7 +28,7 @@ class QuizColors {
 class SwipeLimiter {
   static const _kCountKey = 'swipe_limiter_count';
   static const _kWindowStartKey = 'swipe_limiter_window_start';
-  static const int maxSwipes = 15;
+  static const int maxSwipes = 30; // Swipe/question limit increased to 30
   static const Duration window = Duration(hours: 3);
 
   static Future<int> getCount() async {
@@ -265,7 +265,7 @@ class _CompactHeader extends StatelessWidget {
                   text: 'Prep',
                   style: TextStyle(
                     fontFamily: 'SpaceGrotesk',
-                    fontSize: 18,
+                    fontSize: 13.5, // was 18
                     fontWeight: FontWeight.w700,
                     color: Colors.white,
                     letterSpacing: -0.5,
@@ -276,7 +276,7 @@ class _CompactHeader extends StatelessWidget {
                   text: 'Swipe',
                   style: TextStyle(
                     fontFamily: 'SpaceGrotesk',
-                    fontSize: 18,
+                    fontSize: 13.5, // was 18
                     fontWeight: FontWeight.w700,
                     color: QuizColors.gold,
                     letterSpacing: -0.5,
@@ -300,7 +300,7 @@ class _CompactHeader extends StatelessWidget {
               examType,
               style: const TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 12,
+                fontSize: 9.0, // was 12
                 fontWeight: FontWeight.w600,
                 color: QuizColors.primary,
                 letterSpacing: 0.3,
@@ -439,7 +439,7 @@ class _QuestionCardState extends State<_QuestionCard>
           message,
           style: const TextStyle(
             fontFamily: 'Inter',
-            fontSize: 13,
+            fontSize: 9.75, // was 13
             color: Colors.white,
           ),
         ),
@@ -512,12 +512,20 @@ class _QuestionCardState extends State<_QuestionCard>
                   ),
                 ],
               ),
-              child: _ScrollableCardContent(
-                question: widget.question,
-                questionIndex: widget.questionIndex,
-                selected: selected,
-                submitted: submitted,
-                onSubmit: () => _submit(context, widget.questionIndex),
+              // Use LayoutBuilder so the card fills the swiper slot fully,
+              // then give the scrollable content an exact bounded height.
+              // This prevents SingleChildScrollView from fighting the swiper.
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return _ScrollableCardContent(
+                    question: widget.question,
+                    questionIndex: widget.questionIndex,
+                    selected: selected,
+                    submitted: submitted,
+                    onSubmit: () => _submit(context, widget.questionIndex),
+                    maxHeight: constraints.maxHeight,
+                  );
+                },
               ),
             ),
           ),
@@ -603,6 +611,7 @@ class _ScrollableCardContent extends StatefulWidget {
   final int? selected;
   final bool submitted;
   final VoidCallback onSubmit;
+  final double maxHeight;
 
   const _ScrollableCardContent({
     required this.question,
@@ -610,6 +619,7 @@ class _ScrollableCardContent extends StatefulWidget {
     required this.selected,
     required this.submitted,
     required this.onSubmit,
+    required this.maxHeight,
   });
 
   @override
@@ -633,10 +643,13 @@ class _ScrollableCardContentState extends State<_ScrollableCardContent> {
 
   @override
   Widget build(BuildContext context) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        return true;
-      },
+    // Constrain the scroll view to the card's exact height so the swiper's
+    // gesture arena always wins outside the scrollable area. The
+    // scroll view only intercepts vertical drags when content overflows —
+    // and even then, it propagates events up once it reaches the boundaries,
+    // letting the card swiper take over and complete the swipe.
+    return SizedBox(
+      height: widget.maxHeight,
       child: SingleChildScrollView(
         controller: _scrollController,
         physics: const ClampingScrollPhysics(),
@@ -666,7 +679,7 @@ class _ScrollableCardContentState extends State<_ScrollableCardContent> {
               widget.question.questionText,
               style: const TextStyle(
                 fontFamily: 'Poppins',
-                fontSize: 16,
+                fontSize: 12.0, // was 16
                 fontWeight: FontWeight.w400,
                 color: QuizColors.textPrimary,
                 height: 1.6,
@@ -743,7 +756,7 @@ class _ExplanationPanel extends StatelessWidget {
                   'Explanation',
                   style: TextStyle(
                     fontFamily: 'Poppins',
-                    fontSize: 16,
+                    fontSize: 12.0, // was 16
                     fontWeight: FontWeight.w600,
                     color: QuizColors.textPrimary,
                   ),
@@ -781,7 +794,7 @@ class _ExplanationPanel extends StatelessWidget {
                     explanation!,
                     style: const TextStyle(
                       fontFamily: 'Inter',
-                      fontSize: 14,
+                      fontSize: 10.5, // was 14
                       fontWeight: FontWeight.w400,
                       color: QuizColors.textSecondary,
                       height: 1.6,
@@ -796,7 +809,7 @@ class _ExplanationPanel extends StatelessWidget {
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontFamily: 'Inter',
-                        fontSize: 14,
+                        fontSize: 10.5, // was 14
                         fontWeight: FontWeight.w400,
                         color: QuizColors.textTertiary,
                         height: 1.5,
@@ -832,7 +845,7 @@ class _ExplanationPanel extends StatelessWidget {
                       'Next Question',
                       style: TextStyle(
                         fontFamily: 'Inter',
-                        fontSize: 14,
+                        fontSize: 10.5, // was 14
                         fontWeight: FontWeight.w600,
                         color: QuizColors.primary,
                       ),
@@ -941,7 +954,7 @@ class _ActionButton extends StatelessWidget {
               label,
               style: const TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 10,
+                fontSize: 7.5, // was 10
                 fontWeight: FontWeight.w500,
                 color: QuizColors.textTertiary,
               ),
@@ -1042,7 +1055,7 @@ class _OptionTile extends StatelessWidget {
                   optionLabel,
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 12,
+                    fontSize: 9.0, // was 12
                     fontWeight: FontWeight.w700,
                     color: _labelColor(),
                   ),
@@ -1057,7 +1070,7 @@ class _OptionTile extends StatelessWidget {
                   optionText,
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 14,
+                    fontSize: 10.5, // was 14
                     fontWeight: FontWeight.w400,
                     color: submitted && !isCorrect && !selected
                         ? QuizColors.textTertiary
@@ -1112,7 +1125,7 @@ class _ResultCard extends StatelessWidget {
                 isCorrect ? 'Correct! 🎉' : 'Incorrect',
                 style: TextStyle(
                   fontFamily: 'Poppins',
-                  fontSize: 16,
+                  fontSize: 12.0, // was 16
                   fontWeight: FontWeight.w700,
                   color: color,
                 ),
@@ -1125,7 +1138,7 @@ class _ResultCard extends StatelessWidget {
               'CORRECT ANSWER',
               style: TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 11,
+                fontSize: 8.25, // was 11
                 fontWeight: FontWeight.w600,
                 color: QuizColors.textSecondary,
                 letterSpacing: 0.6,
@@ -1136,7 +1149,7 @@ class _ResultCard extends StatelessWidget {
               correctAnswer,
               style: const TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 14,
+                fontSize: 10.5, // was 14
                 fontWeight: FontWeight.w400,
                 color: QuizColors.textPrimary,
                 height: 1.4,
@@ -1190,7 +1203,7 @@ class _LimitOverlay extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontFamily: 'Poppins',
-                          fontSize: 17,
+                          fontSize: 12.75, // was 17
                           fontWeight: FontWeight.w700,
                           color: QuizColors.textPrimary,
                         ),
@@ -1201,7 +1214,7 @@ class _LimitOverlay extends StatelessWidget {
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontFamily: 'Inter',
-                          fontSize: 13,
+                          fontSize: 9.75, // was 13
                           color: QuizColors.textSecondary,
                           height: 1.4,
                         ),
@@ -1268,7 +1281,7 @@ class _SwipeLimitSheetState extends State<_SwipeLimitSheet> {
                 'You\'ve hit today\'s free limit',
                 style: TextStyle(
                   fontFamily: 'Poppins',
-                  fontSize: 18,
+                  fontSize: 13.5, // was 18
                   fontWeight: FontWeight.w700,
                   color: QuizColors.textPrimary,
                 ),
@@ -1279,7 +1292,7 @@ class _SwipeLimitSheetState extends State<_SwipeLimitSheet> {
                 'More unlock in $hours h $minutes m, or upgrade to keep going now.',
                 style: const TextStyle(
                   fontFamily: 'Inter',
-                  fontSize: 14,
+                  fontSize: 10.5, // was 14
                   color: QuizColors.textSecondary,
                   height: 1.5,
                 ),

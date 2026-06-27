@@ -1,9 +1,39 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 import '../services/api_service.dart';
 import '../utils/app_theme.dart';
 
-const Color _gold = Color(0xFFFFB800);
+const Map<String, Color> _subjectColors = {
+  'Polity': Color(0xFF2563EB),
+  'Environment': Color(0xFF16A34A),
+  'Geography': Color(0xFFF59E0B),
+  'History': Color(0xFFDC2626),
+  'Science': Color(0xFF7C3AED),
+  'Economy': Color(0xFFEA580C),
+  'Current Affairs': Color(0xFF475569),
+  'Art & Culture': Color(0xFF92400E),
+  'Agriculture': Color(0xFF059669),
+  'International Relations': Color(0xFF0891B2),
+};
+
+const Color _defaultAccent = Color(0xFF475569);
+
+Color _colorForSubject(String subject) {
+  for (final key in _subjectColors.keys) {
+    if (subject.toLowerCase().contains(key.toLowerCase()) ||
+        key.toLowerCase().contains(subject.toLowerCase())) {
+      return _subjectColors[key]!;
+    }
+  }
+  return _defaultAccent;
+}
+
+enum _CardType { importantTopic, currentAffair, didYouKnow, todayInHistory }
+
+class _FeedCard {
+  final _CardType type;
+  final Map<String, dynamic> data;
+  _FeedCard({required this.type, required this.data});
+}
 
 class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
@@ -14,12 +44,8 @@ class FeedScreen extends StatefulWidget {
 
 class _FeedScreenState extends State<FeedScreen> {
   final ApiService _api = ApiService();
-  final CardSwiperController _swiperController = CardSwiperController();
 
-  List<Map<String, dynamic>> _importantTopics = [];
-  List<Map<String, dynamic>> _currentAffairs = [];
   List<_FeedCard> _cards = [];
-
   bool _loading = true;
   String? _error;
 
@@ -29,26 +55,30 @@ class _FeedScreenState extends State<FeedScreen> {
     _loadData();
   }
 
-  @override
-  void dispose() {
-    _swiperController.dispose();
-    super.dispose();
-  }
-
   Future<void> _loadData() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final itResult = await _api.getImportantTopics(limit: 30);
-      final caResult = await _api.getCurrentAffairs(limit: 30);
+      final results = await Future.wait([
+        _api.getImportantTopics(limit: 20),
+        _api.getCurrentAffairs(limit: 20),
+        _api.getDidYouKnow(limit: 20),
+        _api.getRandomTodayInPast(count: 10),
+      ]);
 
-      _importantTopics =
-          List<Map<String, dynamic>>.from(itResult['data'] ?? []);
-      _currentAffairs = List<Map<String, dynamic>>.from(caResult['data'] ?? []);
+      final importantTopics =
+          List<Map<String, dynamic>>.from((results[0] as Map)['data'] ?? []);
+      final currentAffairs =
+          List<Map<String, dynamic>>.from((results[1] as Map)['data'] ?? []);
+      final didYouKnow =
+          List<Map<String, dynamic>>.from((results[2] as Map)['data'] ?? []);
+      final todayInHistory =
+          List<Map<String, dynamic>>.from(results[3] as List);
 
-      _buildCardList();
+      _buildCardList(
+          importantTopics, currentAffairs, didYouKnow, todayInHistory);
       setState(() => _loading = false);
     } catch (e) {
       setState(() {
@@ -58,34 +88,47 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
-  void _buildCardList() {
+  void _buildCardList(
+    List<Map<String, dynamic>> importantTopics,
+    List<Map<String, dynamic>> currentAffairs,
+    List<Map<String, dynamic>> didYouKnow,
+    List<Map<String, dynamic>> todayInHistory,
+  ) {
     final List<_FeedCard> cards = [];
-    int itIndex = 0;
-    int caIndex = 0;
-    int position = 0;
+    int itIdx = 0, caIdx = 0, dykIdx = 0, tipIdx = 0;
+    int pos = 0;
 
-    while (
-        itIndex < _importantTopics.length || caIndex < _currentAffairs.length) {
-      if (position % 4 == 3 && caIndex < _currentAffairs.length) {
+    while (itIdx < importantTopics.length ||
+        caIdx < currentAffairs.length ||
+        dykIdx < didYouKnow.length ||
+        tipIdx < todayInHistory.length) {
+      final mod = pos % 5;
+
+      if (mod == 3 && caIdx < currentAffairs.length) {
         cards.add(_FeedCard(
-          type: _CardType.currentAffair,
-          data: _currentAffairs[caIndex],
-        ));
-        caIndex++;
-      } else if (itIndex < _importantTopics.length) {
+            type: _CardType.currentAffair, data: currentAffairs[caIdx++]));
+      } else if (mod == 4 && dykIdx < didYouKnow.length) {
+        cards.add(
+            _FeedCard(type: _CardType.didYouKnow, data: didYouKnow[dykIdx++]));
+      } else if (mod == 2 && tipIdx < todayInHistory.length) {
         cards.add(_FeedCard(
-          type: _CardType.importantTopic,
-          data: _importantTopics[itIndex],
-        ));
-        itIndex++;
-      } else if (caIndex < _currentAffairs.length) {
+            type: _CardType.todayInHistory, data: todayInHistory[tipIdx++]));
+      } else if (itIdx < importantTopics.length) {
         cards.add(_FeedCard(
-          type: _CardType.currentAffair,
-          data: _currentAffairs[caIndex],
-        ));
-        caIndex++;
+            type: _CardType.importantTopic, data: importantTopics[itIdx++]));
+      } else if (caIdx < currentAffairs.length) {
+        cards.add(_FeedCard(
+            type: _CardType.currentAffair, data: currentAffairs[caIdx++]));
+      } else if (dykIdx < didYouKnow.length) {
+        cards.add(
+            _FeedCard(type: _CardType.didYouKnow, data: didYouKnow[dykIdx++]));
+      } else if (tipIdx < todayInHistory.length) {
+        cards.add(_FeedCard(
+            type: _CardType.todayInHistory, data: todayInHistory[tipIdx++]));
+      } else {
+        break;
       }
-      position++;
+      pos++;
     }
 
     _cards = cards;
@@ -97,7 +140,6 @@ class _FeedScreenState extends State<FeedScreen> {
       backgroundColor: AppColors.bg,
       body: SafeArea(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildHeader(),
             Expanded(child: _buildBody()),
@@ -109,7 +151,7 @@ class _FeedScreenState extends State<FeedScreen> {
 
   Widget _buildHeader() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+      padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
       child: Row(
         children: [
           RichText(
@@ -132,7 +174,7 @@ class _FeedScreenState extends State<FeedScreen> {
                     fontFamily: 'SpaceGrotesk',
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
-                    color: _gold,
+                    color: Color(0xFFFFB800),
                     letterSpacing: -0.5,
                     height: 1.0,
                   ),
@@ -141,11 +183,7 @@ class _FeedScreenState extends State<FeedScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          Container(
-            width: 1,
-            height: 18,
-            color: AppColors.cardBorder,
-          ),
+          Container(width: 1, height: 18, color: AppColors.cardBorder),
           const SizedBox(width: 10),
           const Text(
             'Feed',
@@ -157,622 +195,235 @@ class _FeedScreenState extends State<FeedScreen> {
               letterSpacing: -0.5,
             ),
           ),
-          const Spacer(),
-          if (!_loading && _error == null)
-            GestureDetector(
-              onTap: _loadData,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppColors.cardBorder),
-                ),
-                child: const Icon(
-                  Icons.refresh_rounded,
-                  size: 18,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ),
         ],
       ),
     );
   }
 
   Widget _buildBody() {
-    if (_loading) return const _ShimmerCards();
+    if (_loading) return const _ShimmerStack();
     if (_error != null) return _ErrorState(onRetry: _loadData);
     if (_cards.isEmpty) return const _EmptyState();
-    return _SwipeStack(cards: _cards, controller: _swiperController);
+    return _VerticalFeed(cards: _cards);
   }
 }
 
-enum _CardType { importantTopic, currentAffair }
-
-class _FeedCard {
-  final _CardType type;
-  final Map<String, dynamic> data;
-  _FeedCard({required this.type, required this.data});
-}
-
-class _SwipeStack extends StatefulWidget {
+class _VerticalFeed extends StatefulWidget {
   final List<_FeedCard> cards;
-  final CardSwiperController controller;
-
-  const _SwipeStack({required this.cards, required this.controller});
+  const _VerticalFeed({required this.cards});
 
   @override
-  State<_SwipeStack> createState() => _SwipeStackState();
+  State<_VerticalFeed> createState() => _VerticalFeedState();
 }
 
-class _SwipeStackState extends State<_SwipeStack> {
-  final Map<int, bool> _flippedCards = {};
+class _VerticalFeedState extends State<_VerticalFeed> {
+  final PageController _pageController = PageController();
+  final Map<int, bool> _flipped = {};
 
-  bool _isFlipped(int index) => _flippedCards[index] ?? false;
+  bool _isFlipped(int i) => _flipped[i] ?? false;
 
-  void _toggleFlip(int index) {
-    setState(() => _flippedCards[index] = !(_flippedCards[index] ?? false));
+  void _toggleFlip(int i) =>
+      setState(() => _flipped[i] = !(_flipped[i] ?? false));
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        const SizedBox(height: 12),
-        _buildProgressHint(),
-        const SizedBox(height: 4),
-        Expanded(
-          child: CardSwiper(
-            controller: widget.controller,
-            cardsCount: widget.cards.length,
-            numberOfCardsDisplayed:
-                widget.cards.length < 3 ? widget.cards.length : 3,
-            backCardOffset: const Offset(0, 28),
-            scale: 0.94,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            allowedSwipeDirection:
-                const AllowedSwipeDirection.only(left: true, right: true),
-            onSwipe: (prev, current, direction) {
-              if (direction == CardSwiperDirection.left &&
-                  _isFlipped(prev) == false) {
-                setState(() => _flippedCards[prev] = false);
-              }
-              return true;
-            },
-            cardBuilder:
-                (context, index, percentThresholdX, percentThresholdY) {
-              final card = widget.cards[index];
-              final flipped = _isFlipped(index);
-
-              return GestureDetector(
-                onTap: () => _toggleFlip(index),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 380),
-                  transitionBuilder: (child, animation) {
-                    final rotate = Tween(begin: 0.0, end: 1.0).animate(
-                      CurvedAnimation(
-                          parent: animation, curve: Curves.easeInOutCubic),
-                    );
-                    return AnimatedBuilder(
-                      animation: rotate,
-                      child: child,
-                      builder: (context, child) {
-                        final angle = rotate.value * 3.14159;
-                        final isBack = angle > 1.5708;
-                        return Transform(
-                          transform: Matrix4.rotationY(angle),
-                          alignment: Alignment.center,
-                          child: isBack
-                              ? Transform(
-                                  transform: Matrix4.rotationY(3.14159),
-                                  alignment: Alignment.center,
-                                  child: child,
-                                )
-                              : child,
-                        );
-                      },
-                    );
-                  },
-                  child: flipped
-                      ? KeyedSubtree(
-                          key: ValueKey('back_$index'),
-                          child: card.type == _CardType.importantTopic
-                              ? _ImportantTopicBackCard(data: card.data)
-                              : _CurrentAffairBackCard(data: card.data),
-                        )
-                      : KeyedSubtree(
-                          key: ValueKey('front_$index'),
-                          child: card.type == _CardType.importantTopic
-                              ? _ImportantTopicFrontCard(data: card.data)
-                              : _CurrentAffairFrontCard(data: card.data),
-                        ),
-                ),
-              );
-            },
+    return PageView.builder(
+      controller: _pageController,
+      scrollDirection: Axis.vertical,
+      itemCount: widget.cards.length,
+      itemBuilder: (context, index) {
+        final card = widget.cards[index];
+        final flipped = _isFlipped(index);
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: GestureDetector(
+            onTap: () => _toggleFlip(index),
+            child: _FlipCard(
+              flipped: flipped,
+              front: _buildFront(card, index),
+              back: _buildBack(card, index),
+            ),
           ),
-        ),
-        _buildSwipeHint(),
-        const SizedBox(height: 16),
-      ],
+        );
+      },
     );
   }
 
-  Widget _buildProgressHint() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            '${widget.cards.length} cards to explore',
-            style: TextStyle(
-              fontFamily: 'SpaceGrotesk',
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: AppColors.textSecondary,
-            ),
-          ),
-          Row(
-            children: [
-              _TypeBadge(
-                  label: 'Topics', color: AppColors.accent, dotted: false),
-              const SizedBox(width: 8),
-              _TypeBadge(label: 'Current Affairs', color: _gold, dotted: false),
-            ],
-          ),
-        ],
-      ),
-    );
+  Widget _buildFront(_FeedCard card, int index) {
+    switch (card.type) {
+      case _CardType.importantTopic:
+        return _ITFrontCard(data: card.data);
+      case _CardType.currentAffair:
+        return _CAFrontCard(data: card.data);
+      case _CardType.didYouKnow:
+        return _DYKFrontCard(data: card.data);
+      case _CardType.todayInHistory:
+        return _TIPFrontCard(data: card.data);
+    }
   }
 
-  Widget _buildSwipeHint() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.swipe_rounded,
-              size: 14, color: AppColors.textSecondary.withValues(alpha: 0.6)),
-          const SizedBox(width: 6),
-          Text(
-            'Swipe to navigate • Tap to flip',
-            style: TextStyle(
-              fontFamily: 'SpaceGrotesk',
-              fontSize: 12,
-              color: AppColors.textSecondary.withValues(alpha: 0.6),
-            ),
-          ),
-        ],
-      ),
+  Widget _buildBack(_FeedCard card, int index) {
+    switch (card.type) {
+      case _CardType.importantTopic:
+        return _ITBackCard(data: card.data);
+      case _CardType.currentAffair:
+        return _CABackCard(data: card.data);
+      case _CardType.didYouKnow:
+        return _DYKBackCard(data: card.data);
+      case _CardType.todayInHistory:
+        return _TIPBackCard(data: card.data);
+    }
+  }
+}
+
+class _FlipCard extends StatefulWidget {
+  final bool flipped;
+  final Widget front;
+  final Widget back;
+
+  const _FlipCard({
+    required this.flipped,
+    required this.front,
+    required this.back,
+  });
+
+  @override
+  State<_FlipCard> createState() => _FlipCardState();
+}
+
+class _FlipCardState extends State<_FlipCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    );
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOutCubic);
+  }
+
+  @override
+  void didUpdateWidget(_FlipCard old) {
+    super.didUpdateWidget(old);
+    if (widget.flipped != old.flipped) {
+      widget.flipped ? _ctrl.forward() : _ctrl.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (context, _) {
+        final angle = _anim.value * 3.14159;
+        final showBack = angle > 1.5708;
+        return Transform(
+          transform: Matrix4.rotationY(angle),
+          alignment: Alignment.center,
+          child: showBack
+              ? Transform(
+                  transform: Matrix4.rotationY(3.14159),
+                  alignment: Alignment.center,
+                  child: widget.back,
+                )
+              : widget.front,
+        );
+      },
     );
   }
 }
 
-class _ImportantTopicFrontCard extends StatelessWidget {
-  final Map<String, dynamic> data;
-  const _ImportantTopicFrontCard({required this.data});
+class _CardShell extends StatelessWidget {
+  final Color accent;
+  final bool isBack;
+  final Widget child;
+
+  const _CardShell({
+    required this.accent,
+    required this.isBack,
+    required this.child,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final subject = data['subject'] as String? ?? '';
-    final title = data['title'] as String? ?? '';
-
     return Container(
+      width: double.infinity,
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppColors.cardBorder, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -40,
-            right: -40,
-            child: Container(
-              width: 160,
-              height: 160,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.accent.withValues(alpha: 0.05),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -30,
-            left: -30,
-            child: Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.accent.withValues(alpha: 0.04),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    _SubjectBadge(subject: subject, color: AppColors.accent),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppColors.accent.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                        Icons.bookmark_rounded,
-                        size: 16,
-                        color: AppColors.accent,
-                      ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
-                    letterSpacing: -0.5,
-                    height: 1.25,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Container(
-                      width: 28,
-                      height: 2,
-                      decoration: BoxDecoration(
-                        color: AppColors.accent,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      'Tap to see key points',
-                      style: TextStyle(
-                        fontFamily: 'SpaceGrotesk',
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                _CardFooterHint(
-                  icon: Icons.touch_app_rounded,
-                  label: 'Tap to Flip  •  Swipe to Skip',
-                  color: AppColors.accent,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ImportantTopicBackCard extends StatelessWidget {
-  final Map<String, dynamic> data;
-  const _ImportantTopicBackCard({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final subject = data['subject'] as String? ?? '';
-    final title = data['title'] as String? ?? '';
-    final points = List<String>.from(data['points'] ?? []);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(28),
         border: Border.all(
-            color: AppColors.accent.withValues(alpha: 0.3), width: 1.5),
+          color: isBack ? accent.withValues(alpha: 0.4) : AppColors.cardBorder,
+          width: isBack ? 1.5 : 1.0,
+        ),
         boxShadow: [
           BoxShadow(
-            color: AppColors.accent.withValues(alpha: 0.08),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
+            color: isBack
+                ? accent.withValues(alpha: 0.10)
+                : Colors.black.withValues(alpha: 0.18),
+            blurRadius: 28,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SubjectBadge(subject: subject, color: AppColors.accent),
-            const SizedBox(height: 10),
-            Text(
-              title,
-              style: const TextStyle(
-                fontFamily: 'SpaceGrotesk',
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-                letterSpacing: -0.3,
-                height: 1.3,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Container(
-                  width: 3,
-                  height: 16,
-                  decoration: BoxDecoration(
-                    color: AppColors.accent,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Key Points',
-                  style: TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.accent,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: points.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No points available',
-                        style: TextStyle(
-                          fontFamily: 'SpaceGrotesk',
-                          fontSize: 13,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      padding: EdgeInsets.zero,
-                      itemCount: points.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, i) => _BulletPoint(
-                        text: points[i],
-                        color: AppColors.accent,
-                      ),
-                    ),
-            ),
-            const SizedBox(height: 12),
-            _CardFooterHint(
-              icon: Icons.touch_app_rounded,
-              label: 'Tap to flip back',
-              color: AppColors.accent,
-            ),
-          ],
-        ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: child,
       ),
     );
   }
 }
 
-class _CurrentAffairFrontCard extends StatelessWidget {
-  final Map<String, dynamic> data;
-  const _CurrentAffairFrontCard({required this.data});
+class _CategoryBadge extends StatelessWidget {
+  final String emoji;
+  final String label;
+  final Color color;
+
+  const _CategoryBadge({
+    required this.emoji,
+    required this.label,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final date = data['date'] as String? ?? '';
-    final subject = data['subject'] as String? ?? '';
-    final title = data['title'] as String? ?? '';
-    final overview = data['overview'] as String? ?? '';
-
     return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppColors.cardBorder, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: Stack(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Positioned(
-            top: -50,
-            right: -50,
-            child: Container(
-              width: 180,
-              height: 180,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _gold.withValues(alpha: 0.05),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    _DateBadge(date: date),
-                    const SizedBox(width: 8),
-                    _SubjectBadge(subject: subject, color: _gold),
-                  ],
-                ),
-                const Spacer(),
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
-                    letterSpacing: -0.3,
-                    height: 1.3,
-                  ),
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  overview,
-                  style: TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
-                    color: AppColors.textSecondary,
-                    height: 1.55,
-                  ),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const Spacer(),
-                _CardFooterHint(
-                  icon: Icons.swipe_left_rounded,
-                  label: 'Tap to flip for Highlights',
-                  color: _gold,
-                ),
-              ],
+          Text(emoji, style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontFamily: 'SpaceGrotesk',
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
+              letterSpacing: 0.2,
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _CurrentAffairBackCard extends StatelessWidget {
-  final Map<String, dynamic> data;
-  const _CurrentAffairBackCard({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final title = data['title'] as String? ?? '';
-    final highlights = List<String>.from(data['highlights'] ?? []);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: _gold.withValues(alpha: 0.35), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: _gold.withValues(alpha: 0.08),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontFamily: 'SpaceGrotesk',
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-                letterSpacing: -0.3,
-                height: 1.35,
-              ),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Container(
-                  width: 3,
-                  height: 16,
-                  decoration: BoxDecoration(
-                    color: _gold,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Highlights',
-                  style: TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: _gold,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: highlights.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No highlights available',
-                        style: TextStyle(
-                          fontFamily: 'SpaceGrotesk',
-                          fontSize: 13,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      padding: EdgeInsets.zero,
-                      itemCount: highlights.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, i) => _BulletPoint(
-                        text: highlights[i],
-                        color: _gold,
-                      ),
-                    ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _CardFooterHint(
-                  icon: Icons.touch_app_rounded,
-                  label: 'Tap to flip back',
-                  color: _gold,
-                ),
-                Text(
-                  'Stay Updated with PrepSwipe',
-                  style: TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textSecondary.withValues(alpha: 0.5),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -787,19 +438,20 @@ class _SubjectBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Text(
         subject,
         style: TextStyle(
           fontFamily: 'SpaceGrotesk',
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: FontWeight.w600,
           color: color,
-          letterSpacing: 0.2,
+          letterSpacing: 0.3,
         ),
       ),
     );
@@ -808,25 +460,123 @@ class _SubjectBadge extends StatelessWidget {
 
 class _DateBadge extends StatelessWidget {
   final String date;
-  const _DateBadge({required this.date});
+  final Color color;
+
+  const _DateBadge({required this.date, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.cardBorder.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(8),
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Text(
         date,
         style: TextStyle(
           fontFamily: 'SpaceGrotesk',
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: AppColors.textSecondary,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: color.withValues(alpha: 0.9),
         ),
       ),
+    );
+  }
+}
+
+class _TapToSee extends StatelessWidget {
+  final Color color;
+
+  const _TapToSee({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.touch_app_rounded,
+              size: 15, color: color.withValues(alpha: 0.85)),
+          const SizedBox(width: 7),
+          Text(
+            'Tap to See',
+            style: TextStyle(
+              fontFamily: 'SpaceGrotesk',
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: color.withValues(alpha: 0.85),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TapToFlipBack extends StatelessWidget {
+  final Color color;
+
+  const _TapToFlipBack({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(Icons.touch_app_rounded,
+            size: 13, color: color.withValues(alpha: 0.55)),
+        const SizedBox(width: 5),
+        Text(
+          'Tap to flip back',
+          style: TextStyle(
+            fontFamily: 'SpaceGrotesk',
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: color.withValues(alpha: 0.55),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _SectionLabel({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 3,
+          height: 16,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: TextStyle(
+            fontFamily: 'SpaceGrotesk',
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: color,
+            letterSpacing: 0.4,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -843,7 +593,7 @@ class _BulletPoint extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(top: 6),
+          padding: const EdgeInsets.only(top: 7),
           child: Container(
             width: 5,
             height: 5,
@@ -862,7 +612,7 @@ class _BulletPoint extends StatelessWidget {
               fontSize: 13,
               fontWeight: FontWeight.w400,
               color: AppColors.textPrimary,
-              height: 1.5,
+              height: 1.55,
             ),
           ),
         ),
@@ -871,81 +621,800 @@ class _BulletPoint extends StatelessWidget {
   }
 }
 
-class _CardFooterHint extends StatelessWidget {
-  final IconData icon;
-  final String label;
+class _AccentStripe extends StatelessWidget {
   final Color color;
 
-  const _CardFooterHint({
-    required this.icon,
-    required this.label,
-    required this.color,
-  });
+  const _AccentStripe({required this.color});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: color.withValues(alpha: 0.6)),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontFamily: 'SpaceGrotesk',
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: color.withValues(alpha: 0.6),
-          ),
-        ),
-      ],
+    return Container(
+      height: 4,
+      width: double.infinity,
+      color: color,
     );
   }
 }
 
-class _TypeBadge extends StatelessWidget {
-  final String label;
-  final Color color;
-  final bool dotted;
-
-  const _TypeBadge(
-      {required this.label, required this.color, required this.dotted});
+class _ITFrontCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _ITFrontCard({required this.data});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 6,
-          height: 6,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-        ),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: TextStyle(
-            fontFamily: 'SpaceGrotesk',
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-            color: AppColors.textSecondary,
+    final subject = data['subject'] as String? ?? '';
+    final title = data['title'] as String? ?? '';
+    final accent = _colorForSubject(subject);
+
+    return _CardShell(
+      accent: accent,
+      isBack: false,
+      child: Stack(
+        children: [
+          Positioned(
+            top: -60,
+            right: -60,
+            child: Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: 0.05),
+              ),
+            ),
           ),
-        ),
-      ],
+          Positioned(
+            bottom: -40,
+            left: -40,
+            child: Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: 0.04),
+              ),
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _AccentStripe(color: accent),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(26),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _CategoryBadge(
+                            emoji: '📚',
+                            label: 'Important Topics',
+                            color: accent,
+                          ),
+                          const Spacer(),
+                          _SubjectBadge(subject: subject, color: accent),
+                        ],
+                      ),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Text(
+                          '📚',
+                          style: TextStyle(fontSize: 42),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontFamily: 'SpaceGrotesk',
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                          letterSpacing: -0.5,
+                          height: 1.25,
+                        ),
+                      ),
+                      const Spacer(),
+                      _TapToSee(color: accent),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _ShimmerCards extends StatefulWidget {
-  const _ShimmerCards();
+class _ITBackCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _ITBackCard({required this.data});
 
   @override
-  State<_ShimmerCards> createState() => _ShimmerCardsState();
+  Widget build(BuildContext context) {
+    final subject = data['subject'] as String? ?? '';
+    final title = data['title'] as String? ?? '';
+    final points = List<String>.from(data['points'] ?? []);
+    final accent = _colorForSubject(subject);
+
+    return _CardShell(
+      accent: accent,
+      isBack: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccentStripe(color: accent),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _CategoryBadge(
+                          emoji: '📚',
+                          label: 'Important Topics',
+                          color: accent),
+                      const Spacer(),
+                      _SubjectBadge(subject: subject, color: accent),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontFamily: 'SpaceGrotesk',
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                      letterSpacing: -0.3,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _SectionLabel(label: 'KEY POINTS', color: accent),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: points.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No points available',
+                              style: TextStyle(
+                                fontFamily: 'SpaceGrotesk',
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: EdgeInsets.zero,
+                            itemCount: points.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (_, i) =>
+                                _BulletPoint(text: points[i], color: accent),
+                          ),
+                  ),
+                  const SizedBox(height: 12),
+                  _TapToFlipBack(color: accent),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _ShimmerCardsState extends State<_ShimmerCards>
+class _CAFrontCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _CAFrontCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final date = data['date'] as String? ?? '';
+    final subject = data['subject'] as String? ?? '';
+    final title = data['title'] as String? ?? '';
+    final overview = data['overview'] as String? ?? '';
+    final accent =
+        _colorForSubject(subject.isEmpty ? 'Current Affairs' : subject);
+
+    return _CardShell(
+      accent: accent,
+      isBack: false,
+      child: Stack(
+        children: [
+          Positioned(
+            top: -50,
+            right: -50,
+            child: Container(
+              width: 180,
+              height: 180,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: 0.05),
+              ),
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _AccentStripe(color: accent),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(26),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _CategoryBadge(
+                              emoji: '📰',
+                              label: 'Current Affairs',
+                              color: accent),
+                          const Spacer(),
+                          if (subject.isNotEmpty)
+                            _SubjectBadge(subject: subject, color: accent),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (date.isNotEmpty) ...[
+                        _DateBadge(date: date, color: accent),
+                        const SizedBox(height: 4),
+                      ],
+                      const Spacer(),
+                      Text(
+                        '📰',
+                        style: const TextStyle(fontSize: 36),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontFamily: 'SpaceGrotesk',
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                          letterSpacing: -0.3,
+                          height: 1.3,
+                        ),
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (overview.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          overview,
+                          style: TextStyle(
+                            fontFamily: 'SpaceGrotesk',
+                            fontSize: 13,
+                            color: AppColors.textSecondary,
+                            height: 1.55,
+                          ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      const Spacer(),
+                      _TapToSee(color: accent),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CABackCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _CABackCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final subject = data['subject'] as String? ?? '';
+    final date = data['date'] as String? ?? '';
+    final title = data['title'] as String? ?? '';
+    final highlights = List<String>.from(data['highlights'] ?? []);
+    final accent =
+        _colorForSubject(subject.isEmpty ? 'Current Affairs' : subject);
+
+    return _CardShell(
+      accent: accent,
+      isBack: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccentStripe(color: accent),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _CategoryBadge(
+                          emoji: '📰', label: 'Current Affairs', color: accent),
+                      const Spacer(),
+                      if (date.isNotEmpty)
+                        _DateBadge(date: date, color: accent),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontFamily: 'SpaceGrotesk',
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                      letterSpacing: -0.3,
+                      height: 1.35,
+                    ),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 16),
+                  _SectionLabel(label: 'HIGHLIGHTS', color: accent),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: highlights.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No highlights available',
+                              style: TextStyle(
+                                fontFamily: 'SpaceGrotesk',
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: EdgeInsets.zero,
+                            itemCount: highlights.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (_, i) => _BulletPoint(
+                                text: highlights[i], color: accent),
+                          ),
+                  ),
+                  const SizedBox(height: 12),
+                  _TapToFlipBack(color: accent),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DYKFrontCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _DYKFrontCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final subject = data['subject'] as String? ?? '';
+    final title = data['title'] as String? ?? data['fact'] as String? ?? '';
+    final accent = _colorForSubject(subject);
+
+    return _CardShell(
+      accent: accent,
+      isBack: false,
+      child: Stack(
+        children: [
+          Positioned(
+            top: -50,
+            right: -50,
+            child: Container(
+              width: 180,
+              height: 180,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: 0.06),
+              ),
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _AccentStripe(color: accent),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(26),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _CategoryBadge(
+                              emoji: '💡',
+                              label: 'Did You Know',
+                              color: accent),
+                          const Spacer(),
+                          if (subject.isNotEmpty)
+                            _SubjectBadge(subject: subject, color: accent),
+                        ],
+                      ),
+                      const Spacer(),
+                      Text('💡', style: const TextStyle(fontSize: 42)),
+                      const SizedBox(height: 20),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontFamily: 'SpaceGrotesk',
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                          letterSpacing: -0.3,
+                          height: 1.3,
+                        ),
+                        maxLines: 5,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const Spacer(),
+                      _TapToSee(color: accent),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DYKBackCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _DYKBackCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final subject = data['subject'] as String? ?? '';
+    final title = data['title'] as String? ?? data['fact'] as String? ?? '';
+    final explanation =
+        data['explanation'] as String? ?? data['description'] as String? ?? '';
+    final keyFacts =
+        List<String>.from(data['keyFacts'] ?? data['points'] ?? []);
+    final examRelevance = data['examRelevance'] as String? ?? '';
+    final accent = _colorForSubject(subject);
+
+    return _CardShell(
+      accent: accent,
+      isBack: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccentStripe(color: accent),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _CategoryBadge(
+                          emoji: '💡', label: 'Did You Know', color: accent),
+                      const Spacer(),
+                      if (subject.isNotEmpty)
+                        _SubjectBadge(subject: subject, color: accent),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontFamily: 'SpaceGrotesk',
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                      letterSpacing: -0.2,
+                      height: 1.35,
+                    ),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 14),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (explanation.isNotEmpty) ...[
+                            _SectionLabel(label: 'EXPLANATION', color: accent),
+                            const SizedBox(height: 8),
+                            Text(
+                              explanation,
+                              style: TextStyle(
+                                fontFamily: 'SpaceGrotesk',
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                                height: 1.55,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                          if (keyFacts.isNotEmpty) ...[
+                            _SectionLabel(label: 'KEY FACTS', color: accent),
+                            const SizedBox(height: 8),
+                            ...keyFacts.map((f) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: _BulletPoint(text: f, color: accent),
+                                )),
+                            const SizedBox(height: 6),
+                          ],
+                          if (examRelevance.isNotEmpty) ...[
+                            _SectionLabel(
+                                label: 'EXAM RELEVANCE', color: accent),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: accent.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                    color: accent.withValues(alpha: 0.2)),
+                              ),
+                              child: Text(
+                                examRelevance,
+                                style: TextStyle(
+                                  fontFamily: 'SpaceGrotesk',
+                                  fontSize: 12,
+                                  color: AppColors.textPrimary,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _TapToFlipBack(color: accent),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TIPFrontCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _TIPFrontCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final subject = data['subject'] as String? ?? '';
+    final title = data['title'] as String? ?? '';
+    final date = data['date'] as String? ?? data['year'] as String? ?? '';
+    final accent = _colorForSubject(subject.isEmpty ? 'History' : subject);
+
+    return _CardShell(
+      accent: accent,
+      isBack: false,
+      child: Stack(
+        children: [
+          Positioned(
+            top: -50,
+            right: -50,
+            child: Container(
+              width: 180,
+              height: 180,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: 0.05),
+              ),
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _AccentStripe(color: accent),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(26),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _CategoryBadge(
+                              emoji: '🕰️',
+                              label: 'Today in History',
+                              color: accent),
+                          const Spacer(),
+                          if (subject.isNotEmpty)
+                            _SubjectBadge(subject: subject, color: accent),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (date.isNotEmpty)
+                        _DateBadge(date: date, color: accent),
+                      const Spacer(),
+                      Text('🕰️', style: const TextStyle(fontSize: 42)),
+                      const SizedBox(height: 20),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontFamily: 'SpaceGrotesk',
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                          letterSpacing: -0.3,
+                          height: 1.3,
+                        ),
+                        maxLines: 5,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const Spacer(),
+                      _TapToSee(color: accent),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TIPBackCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _TIPBackCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final subject = data['subject'] as String? ?? '';
+    final title = data['title'] as String? ?? '';
+    final date = data['date'] as String? ?? data['year'] as String? ?? '';
+    final description =
+        data['description'] as String? ?? data['overview'] as String? ?? '';
+    final points = List<String>.from(
+        data['points'] ?? data['highlights'] ?? data['keyPoints'] ?? []);
+    final significance = data['significance'] as String? ?? '';
+    final accent = _colorForSubject(subject.isEmpty ? 'History' : subject);
+
+    return _CardShell(
+      accent: accent,
+      isBack: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AccentStripe(color: accent),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _CategoryBadge(
+                          emoji: '🕰️',
+                          label: 'Today in History',
+                          color: accent),
+                      const Spacer(),
+                      if (date.isNotEmpty)
+                        _DateBadge(date: date, color: accent),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontFamily: 'SpaceGrotesk',
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                      letterSpacing: -0.2,
+                      height: 1.35,
+                    ),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 14),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (description.isNotEmpty) ...[
+                            _SectionLabel(label: 'OVERVIEW', color: accent),
+                            const SizedBox(height: 8),
+                            Text(
+                              description,
+                              style: TextStyle(
+                                fontFamily: 'SpaceGrotesk',
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                                height: 1.55,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
+                          if (points.isNotEmpty) ...[
+                            _SectionLabel(label: 'KEY FACTS', color: accent),
+                            const SizedBox(height: 8),
+                            ...points.map((p) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: _BulletPoint(text: p, color: accent),
+                                )),
+                            const SizedBox(height: 6),
+                          ],
+                          if (significance.isNotEmpty) ...[
+                            _SectionLabel(label: 'SIGNIFICANCE', color: accent),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: accent.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                    color: accent.withValues(alpha: 0.2)),
+                              ),
+                              child: Text(
+                                significance,
+                                style: const TextStyle(
+                                  fontFamily: 'SpaceGrotesk',
+                                  fontSize: 12,
+                                  color: AppColors.textPrimary,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _TapToFlipBack(color: accent),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ShimmerStack extends StatefulWidget {
+  const _ShimmerStack();
+
+  @override
+  State<_ShimmerStack> createState() => _ShimmerStackState();
+}
+
+class _ShimmerStackState extends State<_ShimmerStack>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _animation;
+  late Animation<double> _anim;
 
   @override
   void initState() {
@@ -954,7 +1423,7 @@ class _ShimmerCardsState extends State<_ShimmerCards>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
-    _animation = Tween<double>(begin: 0.3, end: 0.7).animate(
+    _anim = Tween<double>(begin: 0.25, end: 0.65).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
     );
   }
@@ -968,81 +1437,57 @@ class _ShimmerCardsState extends State<_ShimmerCards>
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: _animation,
+      animation: _anim,
       builder: (context, _) {
         final shimmerColor =
-            AppColors.cardBorder.withValues(alpha: _animation.value);
+            AppColors.cardBorder.withValues(alpha: _anim.value);
         return Padding(
-          padding: const EdgeInsets.all(20),
-          child: Stack(
-            alignment: Alignment.topCenter,
-            children: [
-              Positioned(
-                top: 24,
-                left: 8,
-                right: 8,
-                child: _ShimmerCard(color: shimmerColor, opacity: 0.5),
-              ),
-              Positioned(
-                top: 12,
-                left: 4,
-                right: 4,
-                child: _ShimmerCard(color: shimmerColor, opacity: 0.7),
-              ),
-              _ShimmerCard(color: shimmerColor, opacity: 1.0),
-            ],
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: AppColors.cardBorder),
+            ),
+            padding: const EdgeInsets.all(26),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                        width: 130, height: 26, decoration: _box(shimmerColor)),
+                    const Spacer(),
+                    Container(
+                        width: 60, height: 22, decoration: _box(shimmerColor)),
+                  ],
+                ),
+                const Spacer(),
+                Container(
+                    width: 60, height: 50, decoration: _box(shimmerColor)),
+                const SizedBox(height: 20),
+                Container(
+                    width: double.infinity,
+                    height: 30,
+                    decoration: _box(shimmerColor)),
+                const SizedBox(height: 12),
+                Container(
+                    width: 220, height: 30, decoration: _box(shimmerColor)),
+                const SizedBox(height: 8),
+                Container(
+                    width: 160, height: 30, decoration: _box(shimmerColor)),
+                const Spacer(),
+                Container(
+                    width: 120, height: 38, decoration: _box(shimmerColor)),
+              ],
+            ),
           ),
         );
       },
     );
   }
-}
 
-class _ShimmerCard extends StatelessWidget {
-  final Color color;
-  final double opacity;
-
-  const _ShimmerCard({required this.color, required this.opacity});
-
-  @override
-  Widget build(BuildContext context) {
-    return Opacity(
-      opacity: opacity,
-      child: Container(
-        height: MediaQuery.of(context).size.height * 0.55,
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: AppColors.cardBorder),
-        ),
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(width: 80, height: 26, decoration: _shimmerBox(color)),
-            const Spacer(),
-            Container(
-                width: double.infinity,
-                height: 30,
-                decoration: _shimmerBox(color)),
-            const SizedBox(height: 12),
-            Container(width: 200, height: 30, decoration: _shimmerBox(color)),
-            const SizedBox(height: 24),
-            Container(
-                width: double.infinity,
-                height: 13,
-                decoration: _shimmerBox(color)),
-            const SizedBox(height: 8),
-            Container(width: 180, height: 13, decoration: _shimmerBox(color)),
-            const Spacer(),
-            Container(width: 140, height: 13, decoration: _shimmerBox(color)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  BoxDecoration _shimmerBox(Color color) => BoxDecoration(
+  BoxDecoration _box(Color color) => BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(8),
       );
@@ -1067,11 +1512,8 @@ class _ErrorState extends StatelessWidget {
                 color: Colors.red.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.wifi_off_rounded,
-                size: 28,
-                color: Colors.red,
-              ),
+              child: const Icon(Icons.wifi_off_rounded,
+                  size: 28, color: Colors.red),
             ),
             const SizedBox(height: 20),
             const Text(
@@ -1133,10 +1575,7 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              '📚',
-              style: TextStyle(fontSize: 48),
-            ),
+            const Text('📚', style: TextStyle(fontSize: 48)),
             const SizedBox(height: 20),
             const Text(
               'Nothing here yet',
