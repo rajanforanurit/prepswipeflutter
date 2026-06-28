@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -603,27 +604,6 @@ class _QuestionCardState extends State<_QuestionCard>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// THE CORE FIX
-//
-// Problem: flutter_card_swiper uses onPanUpdate (a GestureDetector) to move
-// the card. SingleChildScrollView ALSO registers a vertical drag recognizer.
-// They fight in the gesture arena — and the scroll always wins on long cards
-// because it gets priority as an inner widget.
-//
-// Solution: Use a raw Listener widget (pointer events, NOT the gesture arena)
-// to intercept touch events BEFORE the gesture system. On every PointerMove:
-//   1. If there is no scrollable overflow → do nothing → swiper handles it
-//   2. If scrolling mid-content → manually drive ScrollController.jumpTo()
-//      and mark this touch as "claimed by scroll" so swiper gets nothing
-//   3. If at top edge AND dragging down → let swiper win (previous card)
-//   4. If at bottom edge AND dragging up → let swiper win (next card)
-//
-// Because Listener is below the arena, it can intercept and absorb events
-// without interfering when not needed. We use a simple bool flag per pointer
-// to track intent once decided on the first move of each gesture.
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _ScrollableCardContent extends StatefulWidget {
   final Question question;
   final int questionIndex;
@@ -645,13 +625,23 @@ class _ScrollableCardContent extends StatefulWidget {
   State<_ScrollableCardContent> createState() => _ScrollableCardContentState();
 }
 
+class _CardScrollGestureRecognizer extends VerticalDragGestureRecognizer {
+  _CardScrollGestureRecognizer({required this.shouldAccept});
+
+  final bool Function() shouldAccept;
+
+  @override
+  void acceptGesture(int pointer) {
+    if (shouldAccept()) {
+      super.acceptGesture(pointer);
+    } else {
+      super.rejectGesture(pointer);
+    }
+  }
+}
+
 class _ScrollableCardContentState extends State<_ScrollableCardContent> {
   final ScrollController _scrollController = ScrollController();
-
-  // Per-gesture state — reset on every PointerDown
-  bool _gestureClaimedByScroll = false;
-
-  static const double _kDragThreshold = 5.0;
 
   @override
   void dispose() {
@@ -667,85 +657,52 @@ class _ScrollableCardContentState extends State<_ScrollableCardContent> {
   bool get _isAtTop {
     if (!_scrollController.hasClients) return true;
     return _scrollController.position.pixels <=
-        _scrollController.position.minScrollExtent + 1.0;
+        _scrollController.position.minScrollExtent + 0.5;
   }
 
   bool get _isAtBottom {
     if (!_scrollController.hasClients) return true;
     return _scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 1.0;
+        _scrollController.position.maxScrollExtent - 0.5;
   }
 
-  void _onPointerDown(PointerDownEvent event) {
-    _gestureClaimedByScroll = false;
-  }
-
-  void _onPointerMove(PointerMoveEvent event) {
-    final dy = event.delta.dy;
-
-    // No scrollable content at all — let the swiper handle everything
-    if (!_hasOverflow) return;
-
-    // Already decided for this gesture: keep scrolling
-    if (_gestureClaimedByScroll) {
-      _scrollBy(-dy);
-      return;
-    }
-
-    // Not yet decided. Only act on meaningful movement.
-    if (dy.abs() < _kDragThreshold) return;
-
-    final draggingUp =
-        dy < 0; // finger moving up = scroll down (show more below)
-    final draggingDown =
-        dy > 0; // finger moving down = scroll up (show more above)
-
-    // At top edge and trying to scroll further up (drag down) → give to swiper
-    if (draggingDown && _isAtTop) return;
-
-    // At bottom edge and trying to scroll further down (drag up) → give to swiper
-    if (draggingUp && _isAtBottom) return;
-
-    // We are mid-scroll or scrolling toward content — claim it
-    _gestureClaimedByScroll = true;
-    _scrollBy(-dy);
-  }
-
-  void _onPointerUp(PointerUpEvent event) {
-    _gestureClaimedByScroll = false;
-  }
-
-  void _onPointerCancel(PointerCancelEvent event) {
-    _gestureClaimedByScroll = false;
-  }
-
-  void _scrollBy(double delta) {
+  void _onVerticalDragUpdate(DragUpdateDetails details) {
     if (!_scrollController.hasClients) return;
-    final newOffset = (_scrollController.offset + delta).clamp(
+    final dy = details.delta.dy;
+    final newOffset = (_scrollController.offset - dy).clamp(
       _scrollController.position.minScrollExtent,
       _scrollController.position.maxScrollExtent,
     );
     _scrollController.jumpTo(newOffset);
   }
 
+  void _onVerticalDragEnd(DragEndDetails details) {}
+
+  void _onVerticalDragCancel() {}
+
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      onPointerDown: _onPointerDown,
-      onPointerMove: _onPointerMove,
-      onPointerUp: _onPointerUp,
-      onPointerCancel: _onPointerCancel,
-      // HitTestBehavior.translucent: we receive events AND pass them through
-      // to children (so taps on options/buttons still work)
+    return RawGestureDetector(
       behavior: HitTestBehavior.translucent,
+      gestures: {
+        _CardScrollGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<_CardScrollGestureRecognizer>(
+          () => _CardScrollGestureRecognizer(
+            shouldAccept: () => _hasOverflow && !(_isAtTop && _isAtBottom),
+          ),
+          (instance) {
+            instance
+              ..onUpdate = _onVerticalDragUpdate
+              ..onEnd = _onVerticalDragEnd
+              ..onCancel = _onVerticalDragCancel
+              ..dragStartBehavior = DragStartBehavior.down;
+          },
+        ),
+      },
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: widget.maxHeight),
         child: SingleChildScrollView(
           controller: _scrollController,
-          // NeverScrollableScrollPhysics: disables the scroll widget's own
-          // gesture handling entirely. We drive it manually via jumpTo above.
-          // This is critical — without this, both Listener AND the scroll
-          // widget respond to the same touch, causing jitter/conflict.
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(20, 20, 64, 20),
           child: Column(

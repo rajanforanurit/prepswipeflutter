@@ -121,7 +121,7 @@ class _LoginPageState extends State<LoginPage>
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const Spacer(flex: 3),
+                        const Spacer(flex: 2), // Keeps content shifted upward
                         _buildBrand(),
                         const SizedBox(height: 16),
                         _buildTagline(),
@@ -209,7 +209,7 @@ class _LoginPageState extends State<LoginPage>
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 17),
+        padding: const EdgeInsets.symmetric(vertical: 16),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
@@ -235,24 +235,11 @@ class _LoginPageState extends State<LoginPage>
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(
-                    width: 26,
-                    height: 26,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.grey.shade300, width: 1),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        'G',
-                        style: TextStyle(
-                          fontFamily: 'SpaceGrotesk',
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF4285F4),
-                        ),
-                      ),
-                    ),
+                  // Real Google logo from assets
+                  Image.asset(
+                    'assets/image/googlelogo.png',
+                    width: 28,
+                    height: 28,
                   ),
                   const SizedBox(width: 12),
                   const Text(

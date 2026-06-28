@@ -14,6 +14,8 @@ const Map<String, Color> _subjectColors = {
   'Art & Culture': Color(0xFF92400E),
   'Agriculture': Color(0xFF059669),
   'International Relations': Color(0xFF0891B2),
+  'Civics': Color(0xFF0369A1),
+  'General': Color(0xFF6B7280),
 };
 
 const Color _defaultAccent = Color(0xFF475569);
@@ -56,6 +58,50 @@ class _FeedScreenState extends State<FeedScreen> {
     _loadData();
   }
 
+  // Fetches every page until the backend has nothing left to return.
+  // Uses a large page size so most collections resolve in a single request.
+  Future<List<Map<String, dynamic>>> _fetchAllImportantTopics() async {
+    const pageSize = 1000;
+    final all = <Map<String, dynamic>>[];
+    int skip = 0;
+    while (true) {
+      final res = await _api.getImportantTopics(limit: pageSize, skip: skip);
+      final page = List<Map<String, dynamic>>.from((res)['data'] ?? []);
+      all.addAll(page);
+      if (page.length < pageSize) break;
+      skip += pageSize;
+    }
+    return all;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchAllCurrentAffairs() async {
+    const pageSize = 1000;
+    final all = <Map<String, dynamic>>[];
+    int skip = 0;
+    while (true) {
+      final res = await _api.getCurrentAffairs(limit: pageSize, skip: skip);
+      final page = List<Map<String, dynamic>>.from((res)['data'] ?? []);
+      all.addAll(page);
+      if (page.length < pageSize) break;
+      skip += pageSize;
+    }
+    return all;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchAllDidYouKnow() async {
+    const pageSize = 1000;
+    final all = <Map<String, dynamic>>[];
+    int skip = 0;
+    while (true) {
+      final res = await _api.getDidYouKnow(limit: pageSize, skip: skip);
+      final page = List<Map<String, dynamic>>.from((res)['data'] ?? []);
+      all.addAll(page);
+      if (page.length < pageSize) break;
+      skip += pageSize;
+    }
+    return all;
+  }
+
   Future<void> _loadData() async {
     setState(() {
       _loading = true;
@@ -63,23 +109,21 @@ class _FeedScreenState extends State<FeedScreen> {
     });
     try {
       final results = await Future.wait([
-        _api.getImportantTopics(limit: 20),
-        _api.getCurrentAffairs(limit: 20),
-        _api.getDidYouKnow(limit: 20),
+        _fetchAllImportantTopics(),
+        _fetchAllCurrentAffairs(),
+        _fetchAllDidYouKnow(),
         _api.getTodayInPastToday(),
       ]);
 
-      final importantTopics =
-          List<Map<String, dynamic>>.from((results[0] as Map)['data'] ?? []);
-      final currentAffairs =
-          List<Map<String, dynamic>>.from((results[1] as Map)['data'] ?? []);
-      final didYouKnow =
-          List<Map<String, dynamic>>.from((results[2] as Map)['data'] ?? []);
+      final importantTopics = results[0] as List<Map<String, dynamic>>;
+      final currentAffairs = results[1] as List<Map<String, dynamic>>;
+      final didYouKnow = results[2] as List<Map<String, dynamic>>;
 
       final todayRaw = results[3] as Map<String, dynamic>;
       final todayItems =
           List<Map<String, dynamic>>.from(todayRaw['data'] ?? []);
 
+      // Group today-in-history by subject
       final Map<String, List<Map<String, dynamic>>> tipBySubject = {};
       for (final item in todayItems) {
         final subject = item['subject'] as String? ?? 'General';
@@ -114,41 +158,66 @@ class _FeedScreenState extends State<FeedScreen> {
     List<Map<String, dynamic>> didYouKnow,
     List<Map<String, dynamic>> todayInHistory,
   ) {
-    final List<_FeedCard> cards = [];
-    int itIdx = 0, caIdx = 0, dykIdx = 0, tipIdx = 0;
-    int pos = 0;
+    // FIX: Use a simple round-robin interleave that NEVER breaks early.
+    // Pattern per cycle: IT, IT, TIP, CA, DYK
+    // When a bucket is empty we skip it and pick from whichever still has items.
+    // The loop only ends when ALL buckets are exhausted.
 
-    while (itIdx < importantTopics.length ||
-        caIdx < currentAffairs.length ||
-        dykIdx < didYouKnow.length ||
-        tipIdx < todayInHistory.length) {
-      final mod = pos % 5;
+    final List<_FeedCard> itCards = importantTopics
+        .map((d) => _FeedCard(type: _CardType.importantTopic, data: d))
+        .toList();
+    final List<_FeedCard> caCards = currentAffairs
+        .map((d) => _FeedCard(type: _CardType.currentAffair, data: d))
+        .toList();
+    final List<_FeedCard> dykCards = didYouKnow
+        .map((d) => _FeedCard(type: _CardType.didYouKnow, data: d))
+        .toList();
+    final List<_FeedCard> tipCards = todayInHistory
+        .map((d) => _FeedCard(type: _CardType.todayInHistory, data: d))
+        .toList();
 
-      if (mod == 3 && caIdx < currentAffairs.length) {
-        cards.add(_FeedCard(
-            type: _CardType.currentAffair, data: currentAffairs[caIdx++]));
-      } else if (mod == 4 && dykIdx < didYouKnow.length) {
-        cards.add(
-            _FeedCard(type: _CardType.didYouKnow, data: didYouKnow[dykIdx++]));
-      } else if (mod == 2 && tipIdx < todayInHistory.length) {
-        cards.add(_FeedCard(
-            type: _CardType.todayInHistory, data: todayInHistory[tipIdx++]));
-      } else if (itIdx < importantTopics.length) {
-        cards.add(_FeedCard(
-            type: _CardType.importantTopic, data: importantTopics[itIdx++]));
-      } else if (caIdx < currentAffairs.length) {
-        cards.add(_FeedCard(
-            type: _CardType.currentAffair, data: currentAffairs[caIdx++]));
-      } else if (dykIdx < didYouKnow.length) {
-        cards.add(
-            _FeedCard(type: _CardType.didYouKnow, data: didYouKnow[dykIdx++]));
-      } else if (tipIdx < todayInHistory.length) {
-        cards.add(_FeedCard(
-            type: _CardType.todayInHistory, data: todayInHistory[tipIdx++]));
-      } else {
-        break;
+    // Helper: pick from preferred list, fall back to any non-empty list
+    _FeedCard? _pickFrom(
+      List<_FeedCard> preferred,
+      List<List<_FeedCard>> fallbacks,
+    ) {
+      if (preferred.isNotEmpty) return preferred.removeAt(0);
+      for (final fb in fallbacks) {
+        if (fb.isNotEmpty) return fb.removeAt(0);
       }
-      pos++;
+      return null;
+    }
+
+    final List<_FeedCard> cards = [];
+
+    // Work on mutable copies so we can removeAt(0) safely
+    final it = List<_FeedCard>.from(itCards);
+    final ca = List<_FeedCard>.from(caCards);
+    final dyk = List<_FeedCard>.from(dykCards);
+    final tip = List<_FeedCard>.from(tipCards);
+
+    // Cycle pattern: IT, IT, TIP, CA, DYK
+    // Each slot tries its preferred bucket first, then falls back to others
+    while (it.isNotEmpty || ca.isNotEmpty || dyk.isNotEmpty || tip.isNotEmpty) {
+      // Slot 1: IT
+      final c1 = _pickFrom(it, [dyk, ca, tip]);
+      if (c1 != null) cards.add(c1);
+
+      // Slot 2: IT
+      final c2 = _pickFrom(it, [dyk, ca, tip]);
+      if (c2 != null) cards.add(c2);
+
+      // Slot 3: TIP (Today in History)
+      final c3 = _pickFrom(tip, [dyk, ca, it]);
+      if (c3 != null) cards.add(c3);
+
+      // Slot 4: CA (Current Affairs)
+      final c4 = _pickFrom(ca, [dyk, it, tip]);
+      if (c4 != null) cards.add(c4);
+
+      // Slot 5: DYK (Did You Know)
+      final c5 = _pickFrom(dyk, [it, ca, tip]);
+      if (c5 != null) cards.add(c5);
     }
 
     _cards = cards;
@@ -1217,8 +1286,8 @@ class _TIPFrontCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _TIPFrontCard({required this.data});
 
-  String _formatDate(String mmdd) {
-    if (mmdd.length < 5) return mmdd;
+  String _formatDate(String ddmm) {
+    if (ddmm.length < 5) return ddmm;
     const months = [
       '',
       'Jan',
@@ -1234,11 +1303,11 @@ class _TIPFrontCard extends StatelessWidget {
       'Nov',
       'Dec'
     ];
-    final parts = mmdd.split('-');
-    if (parts.length < 2) return mmdd;
-    final month = int.tryParse(parts[0]) ?? 0;
-    final day = int.tryParse(parts[1]) ?? 0;
-    if (month < 1 || month > 12) return mmdd;
+    final parts = ddmm.split('-');
+    if (parts.length < 2) return ddmm;
+    final day = int.tryParse(parts[0]) ?? 0;
+    final month = int.tryParse(parts[1]) ?? 0;
+    if (month < 1 || month > 12) return ddmm;
     return '${months[month]} $day';
   }
 
@@ -1348,8 +1417,8 @@ class _TIPBackCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _TIPBackCard({required this.data});
 
-  String _formatDate(String mmdd) {
-    if (mmdd.length < 5) return mmdd;
+  String _formatDate(String ddmm) {
+    if (ddmm.length < 5) return ddmm;
     const months = [
       '',
       'Jan',
@@ -1365,11 +1434,11 @@ class _TIPBackCard extends StatelessWidget {
       'Nov',
       'Dec'
     ];
-    final parts = mmdd.split('-');
-    if (parts.length < 2) return mmdd;
-    final month = int.tryParse(parts[0]) ?? 0;
-    final day = int.tryParse(parts[1]) ?? 0;
-    if (month < 1 || month > 12) return mmdd;
+    final parts = ddmm.split('-');
+    if (parts.length < 2) return ddmm;
+    final day = int.tryParse(parts[0]) ?? 0;
+    final month = int.tryParse(parts[1]) ?? 0;
+    if (month < 1 || month > 12) return ddmm;
     return '${months[month]} $day';
   }
 
