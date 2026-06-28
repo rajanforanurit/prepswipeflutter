@@ -230,61 +230,9 @@ class _FeedScreenState extends State<FeedScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(),
             Expanded(child: _buildBody()),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
-      child: Row(
-        children: [
-          RichText(
-            text: const TextSpan(
-              children: [
-                TextSpan(
-                  text: 'Prep',
-                  style: TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                    letterSpacing: -0.5,
-                    height: 1.0,
-                  ),
-                ),
-                TextSpan(
-                  text: 'Swipe',
-                  style: TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFFFFB800),
-                    letterSpacing: -0.5,
-                    height: 1.0,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Container(width: 1, height: 18, color: AppColors.cardBorder),
-          const SizedBox(width: 10),
-          const Text(
-            'Feed',
-            style: TextStyle(
-              fontFamily: 'SpaceGrotesk',
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-              letterSpacing: -0.5,
-            ),
-          ),
-        ],
       ),
     );
   }

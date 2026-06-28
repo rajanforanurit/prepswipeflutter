@@ -80,7 +80,6 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(),
             _buildTabBar(),
             _buildCategoriesBar(),
             Expanded(
@@ -97,53 +96,6 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-      child: Row(
-        children: [
-          RichText(
-            text: const TextSpan(
-              children: [
-                TextSpan(
-                  text: 'Prep',
-                  style: TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                    letterSpacing: -0.5,
-                    height: 1.0,
-                  ),
-                ),
-                TextSpan(
-                  text: 'Swipe',
-                  style: TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFFFFD700),
-                    letterSpacing: -0.5,
-                    height: 1.0,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '| News',
-            style: GoogleFonts.poppins(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textSecondary,
-            ),
-          ),
-        ],
       ),
     );
   }

@@ -1,12 +1,65 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../utils/app_theme.dart';
 import 'home_screen.dart';
 import 'opennews_screen.dart';
 import 'feed_screen.dart';
 import 'revision_screen.dart';
 import 'profile_screen.dart';
+
+class PrepSwipeTitle extends StatelessWidget {
+  final String tabName;
+
+  const PrepSwipeTitle({super.key, required this.tabName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        RichText(
+          text: const TextSpan(
+            children: [
+              TextSpan(
+                text: 'Prep',
+                style: TextStyle(
+                  fontFamily: 'SpaceGrotesk',
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  letterSpacing: -0.5,
+                  height: 1.0,
+                ),
+              ),
+              TextSpan(
+                text: 'Swipe',
+                style: TextStyle(
+                  fontFamily: 'SpaceGrotesk',
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFFFFD700),
+                  letterSpacing: -0.5,
+                  height: 1.0,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          '| $tabName',
+          style: GoogleFonts.poppins(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -26,6 +79,14 @@ class _MainShellState extends State<MainShell> {
     const ProfileScreen(),
   ];
 
+  static const List<String> _tabNames = [
+    'Home',
+    'Feed',
+    'Revision',
+    'News',
+    'Profile',
+  ];
+
   void _onTabTap(int index) {
     HapticFeedback.selectionClick();
     setState(() => _currentIndex = index);
@@ -36,6 +97,11 @@ class _MainShellState extends State<MainShell> {
     return Scaffold(
       backgroundColor: AppColors.bg,
       extendBody: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: PrepSwipeTitle(tabName: _tabNames[_currentIndex]),
+      ),
       body: IndexedStack(
         index: _currentIndex,
         children: _screens,

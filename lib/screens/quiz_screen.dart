@@ -197,7 +197,6 @@ class _QuizScreenState extends State<QuizScreen> {
         _ => SafeArea(
             child: Column(
               children: [
-                _CompactHeader(examType: examType),
                 Expanded(
                   child: Stack(
                     children: [
@@ -244,73 +243,6 @@ class _QuizScreenState extends State<QuizScreen> {
             ),
           ),
       },
-    );
-  }
-}
-
-class _CompactHeader extends StatelessWidget {
-  final String examType;
-  const _CompactHeader({required this.examType});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          RichText(
-            text: const TextSpan(
-              children: [
-                TextSpan(
-                  text: 'Prep',
-                  style: TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                    letterSpacing: -0.5,
-                    height: 1.0,
-                  ),
-                ),
-                TextSpan(
-                  text: 'Swipe',
-                  style: TextStyle(
-                    fontFamily: 'SpaceGrotesk',
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: QuizColors.gold,
-                    letterSpacing: -0.5,
-                    height: 1.0,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: QuizColors.primary.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: QuizColors.primary.withValues(alpha: 0.3),
-                width: 1,
-              ),
-            ),
-            child: Text(
-              examType,
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 9.0,
-                fontWeight: FontWeight.w600,
-                color: QuizColors.primary,
-                letterSpacing: 0.3,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
