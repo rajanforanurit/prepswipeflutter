@@ -141,54 +141,12 @@ class _RevisionScreenState extends State<RevisionScreen> {
       );
     }
 
-    final totalCount =
-        _clusters.fold<int>(0, (sum, c) => sum + c.questions.length);
-
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      itemCount: _clusters.length + 1,
+      itemCount: _clusters.length,
       itemBuilder: (context, index) {
-        if (index == 0) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
-            child: Row(
-              children: [
-                const Text(
-                  'Revision',
-                  style: TextStyle(
-                    fontFamily: 'Poppins',
-                    fontSize: 20,
-                    fontWeight: FontWeight.w400,
-                    color: RevisionColors.textPrimary,
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: RevisionColors.card.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(20),
-                    border:
-                        Border.all(color: RevisionColors.cardBorder, width: 1),
-                  ),
-                  child: Text(
-                    '$totalCount saved',
-                    style: const TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 12,
-                      fontWeight: FontWeight.w400,
-                      color: RevisionColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        final cluster = _clusters[index - 1];
+        final cluster = _clusters[index];
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: _SubjectClusterTile(

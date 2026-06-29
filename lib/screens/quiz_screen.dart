@@ -1,7 +1,5 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
-import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
@@ -86,7 +84,7 @@ class QuizScreen extends StatefulWidget {
 }
 
 class _QuizScreenState extends State<QuizScreen> {
-  final CardSwiperController _swiperController = CardSwiperController();
+  final PageController _pageController = PageController();
 
   int _swipeCount = 0;
   bool _limitReached = false;
@@ -123,16 +121,9 @@ class _QuizScreenState extends State<QuizScreen> {
     }
   }
 
-  bool _onSwipe(
-    int previousIndex,
-    int? currentIndex,
-    CardSwiperDirection direction,
-  ) {
-    if (_limitReached) return false;
-
-    final nextIndex = currentIndex ?? previousIndex;
-    setState(() => _currentIndex = nextIndex);
-    context.read<QuizProvider>().navigateToQuestion(nextIndex);
+  void _onPageChanged(int index) {
+    setState(() => _currentIndex = index);
+    context.read<QuizProvider>().navigateToQuestion(index);
 
     SwipeLimiter.increment().then((updated) {
       if (!mounted) return;
@@ -147,8 +138,6 @@ class _QuizScreenState extends State<QuizScreen> {
         });
       }
     });
-
-    return true;
   }
 
   void _goToNext() {
@@ -156,7 +145,10 @@ class _QuizScreenState extends State<QuizScreen> {
       _showLimitSheet();
       return;
     }
-    _swiperController.swipe(CardSwiperDirection.top);
+    _pageController.nextPage(
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _showLimitSheet() {
@@ -170,7 +162,7 @@ class _QuizScreenState extends State<QuizScreen> {
 
   @override
   void dispose() {
-    _swiperController.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -202,25 +194,15 @@ class _QuizScreenState extends State<QuizScreen> {
                     children: [
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                        child: CardSwiper(
-                          controller: _swiperController,
-                          cardsCount: quiz.questions.length,
-                          numberOfCardsDisplayed:
-                              quiz.questions.length >= 2 ? 2 : 1,
-                          isLoop: false,
-                          isDisabled: false,
-                          allowedSwipeDirection:
-                              const AllowedSwipeDirection.only(
-                                  up: true, down: true),
-                          backCardOffset: const Offset(0, 28),
-                          padding: EdgeInsets.zero,
-                          onSwipe: _onSwipe,
-                          cardBuilder: (
-                            context,
-                            index,
-                            percentThresholdX,
-                            percentThresholdY,
-                          ) {
+                        child: PageView.builder(
+                          controller: _pageController,
+                          scrollDirection: Axis.horizontal,
+                          physics: _limitReached
+                              ? const NeverScrollableScrollPhysics()
+                              : const PageScrollPhysics(),
+                          itemCount: quiz.questions.length,
+                          onPageChanged: _onPageChanged,
+                          itemBuilder: (context, index) {
                             return _QuestionCard(
                               question: quiz.questions[index],
                               questionIndex: index,
@@ -232,7 +214,7 @@ class _QuizScreenState extends State<QuizScreen> {
                       if (_limitReached) _LimitOverlay(onTap: _showLimitSheet),
                       if (!_limitReached)
                         Positioned(
-                          right: 24,
+                          right: 16,
                           bottom: 20,
                           child: _NextButton(onTap: _goToNext),
                         ),
@@ -274,7 +256,7 @@ class _NextButton extends StatelessWidget {
           ],
         ),
         child: const Icon(
-          Icons.keyboard_arrow_down_rounded,
+          Icons.keyboard_arrow_right_rounded,
           color: QuizColors.textSecondary,
           size: 24,
         ),
@@ -422,111 +404,114 @@ class _QuestionCardState extends State<_QuestionCard>
     final submitted = quiz.isSubmitted(widget.questionIndex);
     final explanation = widget.question.explanation;
 
-    return Stack(
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-            child: Container(
-              constraints: const BoxConstraints(minHeight: double.infinity),
-              decoration: BoxDecoration(
-                color: QuizColors.card.withValues(alpha: 0.72),
+    return LayoutBuilder(
+      builder: (context, outerConstraints) {
+        return SizedBox(
+          height: outerConstraints.maxHeight,
+          width: outerConstraints.maxWidth,
+          child: Stack(
+            children: [
+              ClipRRect(
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.06),
-                  width: 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: QuizColors.primary.withValues(alpha: 0.12),
-                    blurRadius: 28,
-                    spreadRadius: -8,
-                    offset: const Offset(0, 12),
-                  ),
-                ],
-              ),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  return _ScrollableCardContent(
-                    question: widget.question,
-                    questionIndex: widget.questionIndex,
-                    selected: selected,
-                    submitted: submitted,
-                    onSubmit: () => _submit(context, widget.questionIndex),
-                    maxHeight: constraints.maxHeight,
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          right: 10,
-          top: 0,
-          bottom: 0,
-          child: Center(
-            child: _CardActionBar(
-              isSaved: _isSaved,
-              isSaving: _isSaving,
-              onSave: _toggleSave,
-              onExplain: _openExplanation,
-              onShare: _onShare,
-            ),
-          ),
-        ),
-        if (_explanationOpen)
-          Positioned.fill(
-            child: GestureDetector(
-              onTap: _closeExplanation,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                color: Colors.black.withValues(alpha: 0.35),
-              ),
-            ),
-          ),
-        if (_explanationOpen)
-          Positioned(
-            top: 0,
-            bottom: 0,
-            right: 0,
-            width: MediaQuery.of(context).size.width * 0.82,
-            child: SlideTransition(
-              position: _panelSlide,
-              child: ClipRRect(
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(20),
-                  bottomLeft: Radius.circular(20),
-                  topRight: Radius.circular(24),
-                  bottomRight: Radius.circular(24),
-                ),
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
                   child: Container(
+                    height: outerConstraints.maxHeight,
                     decoration: BoxDecoration(
-                      color: QuizColors.card.withValues(alpha: 0.97),
+                      color: QuizColors.card.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.06),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: QuizColors.primary.withValues(alpha: 0.12),
+                          blurRadius: 28,
+                          spreadRadius: -8,
+                          offset: const Offset(0, 12),
+                        ),
+                      ],
+                    ),
+                    child: _ScrollableCardContent(
+                      question: widget.question,
+                      questionIndex: widget.questionIndex,
+                      selected: selected,
+                      submitted: submitted,
+                      onSubmit: () => _submit(context, widget.questionIndex),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 10,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _CardActionBar(
+                    isSaved: _isSaved,
+                    isSaving: _isSaving,
+                    onSave: _toggleSave,
+                    onExplain: _openExplanation,
+                    onShare: _onShare,
+                  ),
+                ),
+              ),
+              if (_explanationOpen)
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: _closeExplanation,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.35),
+                    ),
+                  ),
+                ),
+              if (_explanationOpen)
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  right: 0,
+                  width: MediaQuery.of(context).size.width * 0.82,
+                  child: SlideTransition(
+                    position: _panelSlide,
+                    child: ClipRRect(
                       borderRadius: const BorderRadius.only(
                         topLeft: Radius.circular(20),
                         bottomLeft: Radius.circular(20),
                         topRight: Radius.circular(24),
                         bottomRight: Radius.circular(24),
                       ),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08),
-                        width: 1,
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: QuizColors.card.withValues(alpha: 0.97),
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(20),
+                              bottomLeft: Radius.circular(20),
+                              topRight: Radius.circular(24),
+                              bottomRight: Radius.circular(24),
+                            ),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              width: 1,
+                            ),
+                          ),
+                          child: _ExplanationPanel(
+                            explanation: explanation,
+                            onClose: _closeExplanation,
+                            onNext: _closeAndNext,
+                          ),
+                        ),
                       ),
-                    ),
-                    child: _ExplanationPanel(
-                      explanation: explanation,
-                      onClose: _closeExplanation,
-                      onNext: _closeAndNext,
                     ),
                   ),
                 ),
-              ),
-            ),
+            ],
           ),
-      ],
+        );
+      },
     );
   }
 
@@ -536,13 +521,12 @@ class _QuestionCardState extends State<_QuestionCard>
   }
 }
 
-class _ScrollableCardContent extends StatefulWidget {
+class _ScrollableCardContent extends StatelessWidget {
   final Question question;
   final int questionIndex;
   final int? selected;
   final bool submitted;
   final VoidCallback onSubmit;
-  final double maxHeight;
 
   const _ScrollableCardContent({
     required this.question,
@@ -550,167 +534,80 @@ class _ScrollableCardContent extends StatefulWidget {
     required this.selected,
     required this.submitted,
     required this.onSubmit,
-    required this.maxHeight,
   });
 
   @override
-  State<_ScrollableCardContent> createState() => _ScrollableCardContentState();
-}
-
-class _CardScrollGestureRecognizer extends VerticalDragGestureRecognizer {
-  _CardScrollGestureRecognizer({required this.shouldAccept});
-
-  final bool Function() shouldAccept;
-
-  @override
-  void acceptGesture(int pointer) {
-    if (shouldAccept()) {
-      super.acceptGesture(pointer);
-    } else {
-      super.rejectGesture(pointer);
-    }
-  }
-}
-
-class _ScrollableCardContentState extends State<_ScrollableCardContent> {
-  final ScrollController _scrollController = ScrollController();
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  bool get _hasOverflow {
-    if (!_scrollController.hasClients) return false;
-    return _scrollController.position.maxScrollExtent > 0.0;
-  }
-
-  bool get _isAtTop {
-    if (!_scrollController.hasClients) return true;
-    return _scrollController.position.pixels <=
-        _scrollController.position.minScrollExtent + 0.5;
-  }
-
-  bool get _isAtBottom {
-    if (!_scrollController.hasClients) return true;
-    return _scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 0.5;
-  }
-
-  void _onVerticalDragUpdate(DragUpdateDetails details) {
-    if (!_scrollController.hasClients) return;
-    final dy = details.delta.dy;
-    final newOffset = (_scrollController.offset - dy).clamp(
-      _scrollController.position.minScrollExtent,
-      _scrollController.position.maxScrollExtent,
-    );
-    _scrollController.jumpTo(newOffset);
-  }
-
-  void _onVerticalDragEnd(DragEndDetails details) {}
-
-  void _onVerticalDragCancel() {}
-
-  @override
   Widget build(BuildContext context) {
-    return RawGestureDetector(
-      behavior: HitTestBehavior.translucent,
-      gestures: {
-        _CardScrollGestureRecognizer:
-            GestureRecognizerFactoryWithHandlers<_CardScrollGestureRecognizer>(
-          () => _CardScrollGestureRecognizer(
-            shouldAccept: () => _hasOverflow && !(_isAtTop && _isAtBottom),
-          ),
-          (instance) {
-            instance
-              ..onUpdate = _onVerticalDragUpdate
-              ..onEnd = _onVerticalDragEnd
-              ..onCancel = _onVerticalDragCancel
-              ..dragStartBehavior = DragStartBehavior.down;
-          },
-        ),
-      },
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: widget.maxHeight),
-        child: SingleChildScrollView(
-          controller: _scrollController,
-          physics: const NeverScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(20, 20, 64, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 20, 64, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
             children: [
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  PSBadge(
-                      label: widget.question.year.toString(),
-                      color: QuizColors.secondary),
-                  PSBadge(
-                      label: widget.question.subject,
-                      color: QuizColors.textSecondary),
-                  if (widget.question.topic != null)
-                    PSBadge(
-                        label: widget.question.topic!,
-                        color: QuizColors.textSecondary),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(
-                widget.question.questionText,
-                style: const TextStyle(
-                  fontFamily: 'Poppins',
-                  fontSize: 12.0,
-                  fontWeight: FontWeight.w400,
-                  color: QuizColors.textPrimary,
-                  height: 1.6,
-                ),
-              ),
-              const SizedBox(height: 16),
-              ...widget.question.optionList.map((opt) {
-                final optKey = int.tryParse(opt.key) ?? 0;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _OptionTile(
-                    optionKey: optKey,
-                    optionLabel: opt.key,
-                    optionText: opt.value,
-                    selected: widget.selected == optKey,
-                    submitted: widget.submitted,
-                    isCorrect: widget.question.correctAnswer == optKey,
-                    onTap: widget.submitted
-                        ? null
-                        : () => context
-                            .read<QuizProvider>()
-                            .selectOption(widget.questionIndex, optKey),
-                  ),
-                );
-              }),
-              const SizedBox(height: 6),
-              if (!widget.submitted) ...[
-                SizedBox(
-                  width: double.infinity,
-                  child: PSButton(
-                    label: 'Submit Answer',
-                    icon: Icons.check_rounded,
-                    color: widget.selected == null
-                        ? QuizColors.textTertiary
-                        : QuizColors.primary,
-                    onTap: widget.selected == null ? null : widget.onSubmit,
-                  ),
-                ),
-              ] else ...[
-                _ResultCard(
-                  isCorrect: widget.selected == widget.question.correctAnswer,
-                  correctAnswer:
-                      '${widget.question.correctAnswer}. ${widget.question.options[widget.question.correctAnswer.toString()] ?? ''}',
-                ),
-              ],
+              PSBadge(
+                  label: question.year.toString(), color: QuizColors.secondary),
+              PSBadge(label: question.subject, color: QuizColors.textSecondary),
+              if (question.topic != null)
+                PSBadge(
+                    label: question.topic!, color: QuizColors.textSecondary),
             ],
           ),
-        ),
+          const SizedBox(height: 14),
+          Text(
+            question.questionText,
+            style: const TextStyle(
+              fontFamily: 'Poppins',
+              fontSize: 12.0,
+              fontWeight: FontWeight.w400,
+              color: QuizColors.textPrimary,
+              height: 1.6,
+            ),
+          ),
+          const SizedBox(height: 16),
+          ...question.optionList.map((opt) {
+            final optKey = int.tryParse(opt.key) ?? 0;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _OptionTile(
+                optionKey: optKey,
+                optionLabel: opt.key,
+                optionText: opt.value,
+                selected: selected == optKey,
+                submitted: submitted,
+                isCorrect: question.correctAnswer == optKey,
+                onTap: submitted
+                    ? null
+                    : () => context
+                        .read<QuizProvider>()
+                        .selectOption(questionIndex, optKey),
+              ),
+            );
+          }),
+          const SizedBox(height: 6),
+          if (!submitted) ...[
+            SizedBox(
+              width: double.infinity,
+              child: PSButton(
+                label: 'Submit Answer',
+                icon: Icons.check_rounded,
+                color: selected == null
+                    ? QuizColors.textTertiary
+                    : QuizColors.primary,
+                onTap: selected == null ? null : onSubmit,
+              ),
+            ),
+          ] else ...[
+            _ResultCard(
+              isCorrect: selected == question.correctAnswer,
+              correctAnswer:
+                  '${question.correctAnswer}. ${question.options[question.correctAnswer.toString()] ?? ''}',
+            ),
+          ],
+        ],
       ),
     );
   }
