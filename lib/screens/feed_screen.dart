@@ -58,8 +58,6 @@ class _FeedScreenState extends State<FeedScreen> {
     _loadData();
   }
 
-  // Fetches every page until the backend has nothing left to return.
-  // Uses a large page size so most collections resolve in a single request.
   Future<List<Map<String, dynamic>>> _fetchAllImportantTopics() async {
     const pageSize = 1000;
     final all = <Map<String, dynamic>>[];
@@ -123,7 +121,6 @@ class _FeedScreenState extends State<FeedScreen> {
       final todayItems =
           List<Map<String, dynamic>>.from(todayRaw['data'] ?? []);
 
-      // Group today-in-history by subject
       final Map<String, List<Map<String, dynamic>>> tipBySubject = {};
       for (final item in todayItems) {
         final subject = item['subject'] as String? ?? 'General';
@@ -158,11 +155,6 @@ class _FeedScreenState extends State<FeedScreen> {
     List<Map<String, dynamic>> didYouKnow,
     List<Map<String, dynamic>> todayInHistory,
   ) {
-    // FIX: Use a simple round-robin interleave that NEVER breaks early.
-    // Pattern per cycle: IT, IT, TIP, CA, DYK
-    // When a bucket is empty we skip it and pick from whichever still has items.
-    // The loop only ends when ALL buckets are exhausted.
-
     final List<_FeedCard> itCards = importantTopics
         .map((d) => _FeedCard(type: _CardType.importantTopic, data: d))
         .toList();
@@ -176,8 +168,7 @@ class _FeedScreenState extends State<FeedScreen> {
         .map((d) => _FeedCard(type: _CardType.todayInHistory, data: d))
         .toList();
 
-    // Helper: pick from preferred list, fall back to any non-empty list
-    _FeedCard? _pickFrom(
+    _FeedCard? pickFrom(
       List<_FeedCard> preferred,
       List<List<_FeedCard>> fallbacks,
     ) {
@@ -190,33 +181,25 @@ class _FeedScreenState extends State<FeedScreen> {
 
     final List<_FeedCard> cards = [];
 
-    // Work on mutable copies so we can removeAt(0) safely
     final it = List<_FeedCard>.from(itCards);
     final ca = List<_FeedCard>.from(caCards);
     final dyk = List<_FeedCard>.from(dykCards);
     final tip = List<_FeedCard>.from(tipCards);
 
-    // Cycle pattern: IT, IT, TIP, CA, DYK
-    // Each slot tries its preferred bucket first, then falls back to others
     while (it.isNotEmpty || ca.isNotEmpty || dyk.isNotEmpty || tip.isNotEmpty) {
-      // Slot 1: IT
-      final c1 = _pickFrom(it, [dyk, ca, tip]);
+      final c1 = pickFrom(it, [dyk, ca, tip]);
       if (c1 != null) cards.add(c1);
 
-      // Slot 2: IT
-      final c2 = _pickFrom(it, [dyk, ca, tip]);
+      final c2 = pickFrom(it, [dyk, ca, tip]);
       if (c2 != null) cards.add(c2);
 
-      // Slot 3: TIP (Today in History)
-      final c3 = _pickFrom(tip, [dyk, ca, it]);
+      final c3 = pickFrom(tip, [dyk, ca, it]);
       if (c3 != null) cards.add(c3);
 
-      // Slot 4: CA (Current Affairs)
-      final c4 = _pickFrom(ca, [dyk, it, tip]);
+      final c4 = pickFrom(ca, [dyk, it, tip]);
       if (c4 != null) cards.add(c4);
 
-      // Slot 5: DYK (Did You Know)
-      final c5 = _pickFrom(dyk, [it, ca, tip]);
+      final c5 = pickFrom(dyk, [it, ca, tip]);
       if (c5 != null) cards.add(c5);
     }
 
@@ -241,19 +224,19 @@ class _FeedScreenState extends State<FeedScreen> {
     if (_loading) return const _ShimmerStack();
     if (_error != null) return _ErrorState(onRetry: _loadData);
     if (_cards.isEmpty) return const _EmptyState();
-    return _VerticalFeed(cards: _cards);
+    return _HorizontalFeed(cards: _cards);
   }
 }
 
-class _VerticalFeed extends StatefulWidget {
+class _HorizontalFeed extends StatefulWidget {
   final List<_FeedCard> cards;
-  const _VerticalFeed({required this.cards});
+  const _HorizontalFeed({required this.cards});
 
   @override
-  State<_VerticalFeed> createState() => _VerticalFeedState();
+  State<_HorizontalFeed> createState() => _HorizontalFeedState();
 }
 
-class _VerticalFeedState extends State<_VerticalFeed> {
+class _HorizontalFeedState extends State<_HorizontalFeed> {
   final PageController _pageController = PageController();
   final Map<int, bool> _flipped = {};
 
@@ -272,7 +255,7 @@ class _VerticalFeedState extends State<_VerticalFeed> {
   Widget build(BuildContext context) {
     return PageView.builder(
       controller: _pageController,
-      scrollDirection: Axis.vertical,
+      scrollDirection: Axis.horizontal,
       itemCount: widget.cards.length,
       itemBuilder: (context, index) {
         final card = widget.cards[index];
@@ -823,7 +806,7 @@ class _ITBackCard extends StatelessWidget {
                   const SizedBox(height: 12),
                   Expanded(
                     child: points.isEmpty
-                        ? Center(
+                        ? const Center(
                             child: Text(
                               'No points available',
                               style: TextStyle(
@@ -1012,7 +995,7 @@ class _CABackCard extends StatelessWidget {
                   const SizedBox(height: 12),
                   Expanded(
                     child: highlights.isEmpty
-                        ? Center(
+                        ? const Center(
                             child: Text(
                               'No highlights available',
                               style: TextStyle(
@@ -1159,7 +1142,7 @@ class _DYKBackCard extends StatelessWidget {
                   const SizedBox(height: 12),
                   Text(
                     question,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontFamily: 'SpaceGrotesk',
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -1190,7 +1173,7 @@ class _DYKBackCard extends StatelessWidget {
                             ),
                             child: Text(
                               answer,
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontFamily: 'SpaceGrotesk',
                                 fontSize: 15,
                                 fontWeight: FontWeight.w700,
@@ -1206,7 +1189,7 @@ class _DYKBackCard extends StatelessWidget {
                           const SizedBox(height: 8),
                           Text(
                             explanation,
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontFamily: 'SpaceGrotesk',
                               fontSize: 13,
                               color: AppColors.textSecondary,
@@ -1340,7 +1323,7 @@ class _TIPFrontCard extends StatelessWidget {
                         eventCount == 1
                             ? '1 historical event on $formattedDate'
                             : '$eventCount historical events on $formattedDate',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontFamily: 'SpaceGrotesk',
                           fontSize: 13,
                           color: AppColors.textSecondary,
@@ -1431,7 +1414,7 @@ class _TIPBackCard extends StatelessWidget {
                   const SizedBox(height: 12),
                   Expanded(
                     child: events.isEmpty
-                        ? Center(
+                        ? const Center(
                             child: Text(
                               'No events found for today',
                               style: TextStyle(
@@ -1628,7 +1611,7 @@ class _ErrorState extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
+            const Text(
               'We couldn\'t load your feed. Check your connection and try again.',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -1671,15 +1654,15 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return const Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('📚', style: TextStyle(fontSize: 48)),
-            const SizedBox(height: 20),
-            const Text(
+            Text('📚', style: TextStyle(fontSize: 48)),
+            SizedBox(height: 20),
+            Text(
               'Nothing here yet',
               style: TextStyle(
                 fontFamily: 'SpaceGrotesk',
@@ -1688,7 +1671,7 @@ class _EmptyState extends StatelessWidget {
                 color: AppColors.textPrimary,
               ),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             Text(
               'No topics or current affairs available right now.\nCheck back soon.',
               textAlign: TextAlign.center,

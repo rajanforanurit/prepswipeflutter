@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../providers/auth_provider.dart';
 import '../providers/quiz_provider.dart';
 import '../providers/analytics_provider.dart';
@@ -22,6 +23,15 @@ class QuizColors {
   static const success = Color(0xFF22C55E);
   static const error = Color(0xFFEF4444);
   static const gold = Color(0xFFFFD700);
+}
+
+class SoundSettings {
+  static const String _soundPrefKey = 'sound_enabled';
+
+  static Future<bool> isEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_soundPrefKey) ?? true;
+  }
 }
 
 class SwipeLimiter {
@@ -169,8 +179,6 @@ class _QuizScreenState extends State<QuizScreen> {
   @override
   Widget build(BuildContext context) {
     final quiz = context.watch<QuizProvider>();
-    final auth = context.watch<AuthProvider>();
-    final examType = auth.userProfile?.examType ?? 'UPSC';
 
     return Scaffold(
       backgroundColor: QuizColors.background,
@@ -193,7 +201,7 @@ class _QuizScreenState extends State<QuizScreen> {
                   child: Stack(
                     children: [
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                         child: PageView.builder(
                           controller: _pageController,
                           scrollDirection: Axis.horizontal,
@@ -287,10 +295,12 @@ class _QuestionCardState extends State<_QuestionCard>
   bool _explanationOpen = false;
   late AnimationController _panelController;
   late Animation<Offset> _panelSlide;
+  late final AudioPlayer _audioPlayer;
 
   @override
   void initState() {
     super.initState();
+    _audioPlayer = AudioPlayer();
     _panelController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -308,6 +318,7 @@ class _QuestionCardState extends State<_QuestionCard>
   @override
   void dispose() {
     _panelController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -388,21 +399,44 @@ class _QuestionCardState extends State<_QuestionCard>
     });
   }
 
-  Future<void> _onShare() async {
+  Future<void> _onShare(AppLanguage lang) async {
     final q = widget.question;
-    final correctOpt = q.options[q.correctAnswer.toString()] ?? '';
+    final correctOpt = q.optionsFor(lang)[q.correctAnswer.toString()] ?? '';
     final shareText =
-        '🎯 PrepSwipe Quiz\n\n📘 ${q.exam} ${q.year} | ${q.subject}${q.topic != null ? ' › ${q.topic}' : ''}\n\n❓ ${q.questionText}\n\n${q.optionList.map((o) => '${o.key}. ${o.value}').join('\n')}\n\n✅ Answer: ${q.correctAnswer}. $correctOpt\n\nPractice more PYQs on PrepSwipe 👇\nhttps://play.google.com/store/apps/details?id=com.anuritinnovation.prepswipe';
+        '🎯 PrepSwipe Quiz\n\n📘 ${q.exam} ${q.year} | ${q.subject}${q.topic != null ? ' › ${q.topic}' : ''}\n\n❓ ${q.questionText(lang)}\n\n${q.optionList(lang).map((o) => '${o.key}. ${o.value}').join('\n')}\n\n✅ Answer: ${q.correctAnswer}. $correctOpt\n\nPractice more PYQs on PrepSwipe 👇\nhttps://play.google.com/store/apps/details?id=com.anuritinnovation.prepswipe';
     await Share.share(shareText,
         subject: 'PrepSwipe – ${q.exam} ${q.year} Question');
+  }
+
+  Future<void> _playCorrectSound() async {
+    try {
+      final enabled = await SoundSettings.isEnabled();
+      if (!enabled || !mounted) return;
+      await _audioPlayer.stop();
+      await _audioPlayer.play(AssetSource('music/correct_answer.mp3'));
+    } catch (_) {
+      // Sound playback failure should never block the quiz flow.
+    }
+  }
+
+  Future<void> _submit(BuildContext context, int index) async {
+    final quizProvider = context.read<QuizProvider>();
+    await quizProvider.submitQuestion(index);
+    if (!mounted) return;
+    context.read<AnalyticsProvider>().invalidate();
+    final selected = quizProvider.selectedOptionFor(index);
+    if (selected == widget.question.correctAnswer) {
+      _playCorrectSound();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final quiz = context.watch<QuizProvider>();
+    final lang = quiz.language;
     final selected = quiz.selectedOptionFor(widget.questionIndex);
     final submitted = quiz.isSubmitted(widget.questionIndex);
-    final explanation = widget.question.explanation;
+    final explanation = widget.question.explanation(lang);
 
     return LayoutBuilder(
       builder: (context, outerConstraints) {
@@ -436,6 +470,7 @@ class _QuestionCardState extends State<_QuestionCard>
                     child: _ScrollableCardContent(
                       question: widget.question,
                       questionIndex: widget.questionIndex,
+                      language: lang,
                       selected: selected,
                       submitted: submitted,
                       onSubmit: () => _submit(context, widget.questionIndex),
@@ -453,7 +488,7 @@ class _QuestionCardState extends State<_QuestionCard>
                     isSaving: _isSaving,
                     onSave: _toggleSave,
                     onExplain: _openExplanation,
-                    onShare: _onShare,
+                    onShare: () => _onShare(lang),
                   ),
                 ),
               ),
@@ -514,16 +549,12 @@ class _QuestionCardState extends State<_QuestionCard>
       },
     );
   }
-
-  Future<void> _submit(BuildContext context, int index) async {
-    await context.read<QuizProvider>().submitQuestion(index);
-    context.read<AnalyticsProvider>().invalidate();
-  }
 }
 
 class _ScrollableCardContent extends StatelessWidget {
   final Question question;
   final int questionIndex;
+  final AppLanguage language;
   final int? selected;
   final bool submitted;
   final VoidCallback onSubmit;
@@ -531,6 +562,7 @@ class _ScrollableCardContent extends StatelessWidget {
   const _ScrollableCardContent({
     required this.question,
     required this.questionIndex,
+    required this.language,
     required this.selected,
     required this.submitted,
     required this.onSubmit,
@@ -551,14 +583,11 @@ class _ScrollableCardContent extends StatelessWidget {
               PSBadge(
                   label: question.year.toString(), color: QuizColors.secondary),
               PSBadge(label: question.subject, color: QuizColors.textSecondary),
-              if (question.topic != null)
-                PSBadge(
-                    label: question.topic!, color: QuizColors.textSecondary),
             ],
           ),
           const SizedBox(height: 14),
           Text(
-            question.questionText,
+            question.questionText(language),
             style: const TextStyle(
               fontFamily: 'Poppins',
               fontSize: 12.0,
@@ -568,7 +597,7 @@ class _ScrollableCardContent extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          ...question.optionList.map((opt) {
+          ...question.optionList(language).map((opt) {
             final optKey = int.tryParse(opt.key) ?? 0;
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
@@ -604,7 +633,7 @@ class _ScrollableCardContent extends StatelessWidget {
             _ResultCard(
               isCorrect: selected == question.correctAnswer,
               correctAnswer:
-                  '${question.correctAnswer}. ${question.options[question.correctAnswer.toString()] ?? ''}',
+                  '${question.correctAnswer}. ${question.optionsFor(language)[question.correctAnswer.toString()] ?? ''}',
             ),
           ],
         ],
@@ -1121,7 +1150,7 @@ class _SwipeLimitSheet extends StatefulWidget {
 }
 
 class _SwipeLimitSheetState extends State<_SwipeLimitSheet> {
-  late Duration? _remaining = widget.timeRemaining;
+  late final Duration? _remaining = widget.timeRemaining;
 
   @override
   Widget build(BuildContext context) {

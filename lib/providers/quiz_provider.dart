@@ -16,6 +16,8 @@ class QuizProvider extends ChangeNotifier {
   String? _currentExam;
   String _sessionId = '';
 
+  AppLanguage _language = AppLanguage.english;
+
   int _currentIndex = 0;
   final Map<int, int?> _selectedOptions = {};
   final Map<int, bool> _submitted = {};
@@ -27,6 +29,7 @@ class QuizProvider extends ChangeNotifier {
   int get currentIndex => _currentIndex;
   String get sessionId => _sessionId;
   String? get currentExam => _currentExam;
+  AppLanguage get language => _language;
 
   Question? get currentQuestion =>
       _questions.isNotEmpty && _currentIndex < _questions.length
@@ -35,6 +38,20 @@ class QuizProvider extends ChangeNotifier {
 
   int? selectedOptionFor(int index) => _selectedOptions[index];
   bool isSubmitted(int index) => _submitted[index] == true;
+
+  void setLanguage(AppLanguage lang) {
+    if (_language == lang) return;
+    _language = lang;
+    notifyListeners();
+  }
+
+  void toggleLanguage() {
+    setLanguage(
+      _language == AppLanguage.english
+          ? AppLanguage.hindi
+          : AppLanguage.english,
+    );
+  }
 
   void startSession() {
     _sessionId = _uuid.v4();

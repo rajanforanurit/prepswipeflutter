@@ -95,8 +95,8 @@ class _LoginPageState extends State<LoginPage>
               width: size.width,
               height: size.height,
             ),
-            DecoratedBox(
-              decoration: const BoxDecoration(
+            const DecoratedBox(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,

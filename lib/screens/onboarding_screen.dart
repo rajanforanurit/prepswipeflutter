@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../models/question_model.dart';
+import '../providers/quiz_provider.dart';
 import '../services/api_service.dart';
-import '../utils/app_theme.dart';
 import '../utils/constants.dart';
+import 'quiz_screen.dart' show QuizColors;
 
 class OnboardingScreen extends StatefulWidget {
   final Future<void> Function() onCompleted;
@@ -23,6 +26,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _userIdController = TextEditingController();
   String? _selectedExam;
+  AppLanguage _selectedLanguage = AppLanguage.english;
 
   bool _checkingUserId = false;
   bool _userIdAvailable = false;
@@ -42,25 +46,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void _prefillFromFirebase() {
     final firebaseUser = FirebaseAuth.instance.currentUser;
     if (firebaseUser == null) return;
-
-    final displayName = firebaseUser.displayName ?? '';
-    _nameController.text = displayName;
-
-    final cleanBase = displayName
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9_]'), '')
-        .replaceAll(RegExp(r'_+'), '_')
-        .replaceAll(RegExp(r'^_|_$'), '');
-
-    final base = cleanBase.isNotEmpty
-        ? cleanBase.substring(0, cleanBase.length > 10 ? 10 : cleanBase.length)
-        : 'user';
-
-    final suffix =
-        (DateTime.now().millisecondsSinceEpoch % 9000 + 1000).toString();
-    final suggested = '$base$suffix';
-    _userIdController.text =
-        suggested.length > 20 ? suggested.substring(0, 20) : suggested;
+    _nameController.text = firebaseUser.displayName ?? '';
   }
 
   @override
@@ -160,7 +146,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         name: name,
         examType: exam,
       );
-      if (mounted) await widget.onCompleted();
+      if (mounted) {
+        context.read<QuizProvider>().setLanguage(_selectedLanguage);
+        await widget.onCompleted();
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -175,7 +164,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: QuizColors.background,
       body: SafeArea(
         child: Column(
           children: [
@@ -214,6 +203,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     selectedExam: _selectedExam,
                     onExamSelected: (val) =>
                         setState(() => _selectedExam = val),
+                    selectedLanguage: _selectedLanguage,
+                    onLanguageSelected: (val) =>
+                        setState(() => _selectedLanguage = val),
                     saveError: _saveError,
                   ),
                 ],
@@ -250,7 +242,7 @@ class _OnboardingHeader extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: AppColors.accent,
+                  color: QuizColors.primary,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(Icons.bolt_rounded,
@@ -266,7 +258,7 @@ class _OnboardingHeader extends StatelessWidget {
                         fontFamily: 'SpaceGrotesk',
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary,
+                        color: QuizColors.textPrimary,
                       ),
                     ),
                     TextSpan(
@@ -275,7 +267,7 @@ class _OnboardingHeader extends StatelessWidget {
                         fontFamily: 'SpaceGrotesk',
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.accent,
+                        color: QuizColors.primary,
                       ),
                     ),
                   ],
@@ -288,7 +280,7 @@ class _OnboardingHeader extends StatelessWidget {
                   fontFamily: 'SpaceGrotesk',
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary,
+                  color: QuizColors.textSecondary,
                 ),
               ),
             ],
@@ -302,7 +294,7 @@ class _OnboardingHeader extends StatelessWidget {
                   height: 3,
                   margin: EdgeInsets.only(right: i < 1 ? 6 : 0),
                   decoration: BoxDecoration(
-                    color: active ? AppColors.accent : AppColors.cardBorder,
+                    color: active ? QuizColors.primary : QuizColors.cardBorder,
                     borderRadius: BorderRadius.circular(4),
                   ),
                 ),
@@ -347,7 +339,7 @@ class _Step1Identity extends StatelessWidget {
               fontFamily: 'SpaceGrotesk',
               fontSize: 30,
               fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
+              color: QuizColors.textPrimary,
               height: 1.2,
             ),
           ),
@@ -357,7 +349,7 @@ class _Step1Identity extends StatelessWidget {
             style: TextStyle(
               fontFamily: 'SpaceGrotesk',
               fontSize: 14,
-              color: AppColors.textSecondary,
+              color: QuizColors.textSecondary,
               height: 1.5,
             ),
           ),
@@ -381,33 +373,33 @@ class _Step1Identity extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           if (userIdError != null)
-            _StatusText(text: userIdError!, color: AppColors.red)
+            _StatusText(text: userIdError!, color: QuizColors.error)
           else if (userIdChecked && userIdAvailable)
             const _StatusText(
-                text: '✓ This ID is available!', color: AppColors.green)
+                text: '✓ This ID is available!', color: QuizColors.success)
           else
             const Text(
               'Lowercase letters, numbers, underscore. Min 4 characters.',
               style: TextStyle(
                 fontFamily: 'SpaceGrotesk',
                 fontSize: 11,
-                color: AppColors.textTertiary,
+                color: QuizColors.textTertiary,
               ),
             ),
           const SizedBox(height: 32),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppColors.accent.withValues(alpha: 0.06),
+              color: QuizColors.primary.withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: AppColors.accent.withValues(alpha: 0.15),
+                color: QuizColors.primary.withValues(alpha: 0.15),
               ),
             ),
             child: const Row(
               children: [
                 Icon(Icons.info_outline_rounded,
-                    color: AppColors.accent, size: 18),
+                    color: QuizColors.primary, size: 18),
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -415,7 +407,7 @@ class _Step1Identity extends StatelessWidget {
                     style: TextStyle(
                       fontFamily: 'SpaceGrotesk',
                       fontSize: 12,
-                      color: AppColors.textSecondary,
+                      color: QuizColors.textSecondary,
                       height: 1.4,
                     ),
                   ),
@@ -432,11 +424,15 @@ class _Step1Identity extends StatelessWidget {
 class _Step2Exam extends StatelessWidget {
   final String? selectedExam;
   final ValueChanged<String?> onExamSelected;
+  final AppLanguage selectedLanguage;
+  final ValueChanged<AppLanguage> onLanguageSelected;
   final String? saveError;
 
   const _Step2Exam({
     required this.selectedExam,
     required this.onExamSelected,
+    required this.selectedLanguage,
+    required this.onLanguageSelected,
     required this.saveError,
   });
 
@@ -453,7 +449,7 @@ class _Step2Exam extends StatelessWidget {
               fontFamily: 'SpaceGrotesk',
               fontSize: 30,
               fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary,
+              color: QuizColors.textPrimary,
               height: 1.2,
             ),
           ),
@@ -463,11 +459,31 @@ class _Step2Exam extends StatelessWidget {
             style: TextStyle(
               fontFamily: 'SpaceGrotesk',
               fontSize: 14,
-              color: AppColors.textSecondary,
+              color: QuizColors.textSecondary,
               height: 1.5,
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 28),
+          const _FieldLabel(label: 'Preferred Language'),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _LanguageOption(
+                label: 'English',
+                selected: selectedLanguage == AppLanguage.english,
+                onTap: () => onLanguageSelected(AppLanguage.english),
+              ),
+              const SizedBox(width: 10),
+              _LanguageOption(
+                label: 'हिंदी',
+                selected: selectedLanguage == AppLanguage.hindi,
+                onTap: () => onLanguageSelected(AppLanguage.hindi),
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          const _FieldLabel(label: 'Target Exam'),
+          const SizedBox(height: 12),
           ...AppConstants.examTypes.map((exam) {
             final selected = selectedExam == exam;
             return Padding(
@@ -480,11 +496,12 @@ class _Step2Exam extends StatelessWidget {
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   decoration: BoxDecoration(
                     color: selected
-                        ? AppColors.accent.withValues(alpha: 0.08)
-                        : AppColors.surface,
+                        ? QuizColors.primary.withValues(alpha: 0.08)
+                        : QuizColors.card,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: selected ? AppColors.accent : AppColors.cardBorder,
+                      color:
+                          selected ? QuizColors.primary : QuizColors.cardBorder,
                       width: selected ? 1.8 : 1.2,
                     ),
                   ),
@@ -495,8 +512,8 @@ class _Step2Exam extends StatelessWidget {
                         height: 30,
                         decoration: BoxDecoration(
                           color: selected
-                              ? AppColors.accent
-                              : AppColors.surfaceSecondary,
+                              ? QuizColors.primary
+                              : Colors.white.withValues(alpha: 0.06),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -504,7 +521,7 @@ class _Step2Exam extends StatelessWidget {
                               ? Icons.check_rounded
                               : Icons.radio_button_unchecked_rounded,
                           color:
-                              selected ? Colors.white : AppColors.textTertiary,
+                              selected ? Colors.white : QuizColors.textTertiary,
                           size: 16,
                         ),
                       ),
@@ -517,8 +534,8 @@ class _Step2Exam extends StatelessWidget {
                           fontWeight:
                               selected ? FontWeight.w700 : FontWeight.w500,
                           color: selected
-                              ? AppColors.textPrimary
-                              : AppColors.textSecondary,
+                              ? QuizColors.textPrimary
+                              : QuizColors.textSecondary,
                         ),
                       ),
                     ],
@@ -529,9 +546,57 @@ class _Step2Exam extends StatelessWidget {
           }),
           if (saveError != null) ...[
             const SizedBox(height: 16),
-            _StatusText(text: saveError!, color: AppColors.red),
+            _StatusText(text: saveError!, color: QuizColors.error),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _LanguageOption extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _LanguageOption({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            color: selected
+                ? QuizColors.primary.withValues(alpha: 0.10)
+                : QuizColors.card,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? QuizColors.primary : QuizColors.cardBorder,
+              width: selected ? 1.8 : 1.2,
+            ),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontFamily: 'SpaceGrotesk',
+                fontSize: 14,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected
+                    ? QuizColors.textPrimary
+                    : QuizColors.textSecondary,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -555,10 +620,10 @@ class _OnboardingFooter extends StatelessWidget {
     final isLastStep = currentPage == 1;
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
-      decoration: BoxDecoration(
-        color: AppColors.bg,
+      decoration: const BoxDecoration(
+        color: QuizColors.background,
         border: Border(
-          top: BorderSide(color: AppColors.cardBorder, width: 1),
+          top: BorderSide(color: QuizColors.cardBorder, width: 1),
         ),
       ),
       child: SizedBox(
@@ -569,12 +634,12 @@ class _OnboardingFooter extends StatelessWidget {
             duration: const Duration(milliseconds: 200),
             padding: const EdgeInsets.symmetric(vertical: 17),
             decoration: BoxDecoration(
-              color: canProceed ? AppColors.accent : AppColors.surfaceSecondary,
+              color: canProceed ? QuizColors.primary : QuizColors.card,
               borderRadius: BorderRadius.circular(14),
               boxShadow: canProceed
                   ? [
                       BoxShadow(
-                        color: AppColors.accent.withValues(alpha: 0.3),
+                        color: QuizColors.primary.withValues(alpha: 0.3),
                         blurRadius: 12,
                         offset: const Offset(0, 4),
                       ),
@@ -598,7 +663,7 @@ class _OnboardingFooter extends StatelessWidget {
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                         color:
-                            canProceed ? Colors.white : AppColors.textTertiary,
+                            canProceed ? Colors.white : QuizColors.textTertiary,
                       ),
                     ),
             ),
@@ -621,7 +686,7 @@ class _FieldLabel extends StatelessWidget {
         fontFamily: 'SpaceGrotesk',
         fontSize: 13,
         fontWeight: FontWeight.w600,
-        color: AppColors.textSecondary,
+        color: QuizColors.textSecondary,
         letterSpacing: 0.3,
       ),
     );
@@ -643,9 +708,9 @@ class _InputField extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: QuizColors.card,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.cardBorder),
+        border: Border.all(color: QuizColors.cardBorder),
       ),
       child: TextField(
         controller: controller,
@@ -653,18 +718,18 @@ class _InputField extends StatelessWidget {
           fontFamily: 'SpaceGrotesk',
           fontSize: 15,
           fontWeight: FontWeight.w600,
-          color: AppColors.textPrimary,
+          color: QuizColors.textPrimary,
         ),
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: const TextStyle(
             fontFamily: 'SpaceGrotesk',
             fontSize: 14,
-            color: AppColors.textTertiary,
+            color: QuizColors.textTertiary,
             fontWeight: FontWeight.w400,
           ),
           prefixIcon:
-              Icon(prefixIcon, color: AppColors.textSecondary, size: 20),
+              Icon(prefixIcon, color: QuizColors.textSecondary, size: 20),
           border: InputBorder.none,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
@@ -700,7 +765,7 @@ class _UserIdField extends StatelessWidget {
           height: 18,
           child: CircularProgressIndicator(
             strokeWidth: 2,
-            color: AppColors.accent,
+            color: QuizColors.primary,
           ),
         ),
       );
@@ -709,7 +774,7 @@ class _UserIdField extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         child: Icon(
           userIdAvailable ? Icons.check_circle_rounded : Icons.cancel_rounded,
-          color: userIdAvailable ? AppColors.green : AppColors.red,
+          color: userIdAvailable ? QuizColors.success : QuizColors.error,
           size: 20,
         ),
       );
@@ -717,12 +782,12 @@ class _UserIdField extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: QuizColors.card,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: userIdChecked
-              ? (userIdAvailable ? AppColors.green : AppColors.red)
-              : AppColors.cardBorder,
+              ? (userIdAvailable ? QuizColors.success : QuizColors.error)
+              : QuizColors.cardBorder,
           width: userIdChecked ? 1.5 : 1,
         ),
       ),
@@ -737,18 +802,18 @@ class _UserIdField extends StatelessWidget {
           fontFamily: 'SpaceGrotesk',
           fontSize: 15,
           fontWeight: FontWeight.w600,
-          color: AppColors.textPrimary,
+          color: QuizColors.textPrimary,
         ),
         decoration: InputDecoration(
           hintText: 'e.g. rajan_upsc or uppcs123',
           hintStyle: const TextStyle(
             fontFamily: 'SpaceGrotesk',
             fontSize: 14,
-            color: AppColors.textTertiary,
+            color: QuizColors.textTertiary,
             fontWeight: FontWeight.w400,
           ),
           prefixIcon: const Icon(Icons.alternate_email_rounded,
-              color: AppColors.textSecondary, size: 20),
+              color: QuizColors.textSecondary, size: 20),
           suffixIcon: suffixWidget,
           border: InputBorder.none,
           contentPadding:

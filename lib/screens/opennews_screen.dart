@@ -214,7 +214,8 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
           SizedBox(height: MediaQuery.of(context).size.height * 0.25),
-          Icon(Icons.article_outlined, size: 56, color: AppColors.textTertiary),
+          const Icon(Icons.article_outlined,
+              size: 56, color: AppColors.textTertiary),
           const SizedBox(height: 16),
           Center(
             child: Text(
@@ -268,7 +269,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                       width: 92,
                       height: 92,
                       color: AppColors.surfaceSecondary,
-                      child: Icon(Icons.image_not_supported,
+                      child: const Icon(Icons.image_not_supported,
                           size: 32, color: AppColors.textTertiary),
                     ),
                   ),
@@ -281,7 +282,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                     color: AppColors.surfaceSecondary,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(Icons.newspaper,
+                  child: const Icon(Icons.newspaper,
                       size: 32, color: AppColors.textTertiary),
                 ),
               const SizedBox(width: 12),
@@ -307,7 +308,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: AppColors.primary.withOpacity(0.15),
+                            color: AppColors.primary.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -412,7 +413,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                           height: 180,
                           width: double.infinity,
                           color: AppColors.surfaceSecondary,
-                          child: Icon(Icons.image_not_supported,
+                          child: const Icon(Icons.image_not_supported,
                               size: 60, color: AppColors.textTertiary),
                         ),
                       ),
@@ -435,7 +436,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                       const SizedBox(height: 12),
                       Row(
                         children: [
-                          Icon(Icons.source,
+                          const Icon(Icons.source,
                               size: 16, color: AppColors.primary),
                           const SizedBox(width: 4),
                           Text(
@@ -447,7 +448,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                             ),
                           ),
                           const SizedBox(width: 16),
-                          Icon(Icons.access_time,
+                          const Icon(Icons.access_time,
                               size: 16, color: AppColors.textTertiary),
                           const SizedBox(width: 4),
                           Text(
@@ -459,7 +460,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                           ),
                         ],
                       ),
-                      Divider(height: 28, color: AppColors.cardBorder),
+                      const Divider(height: 28, color: AppColors.cardBorder),
                       Text(
                         news.description,
                         style: GoogleFonts.poppins(

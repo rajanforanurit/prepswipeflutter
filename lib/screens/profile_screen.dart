@@ -8,6 +8,7 @@ import '../providers/quiz_provider.dart';
 import '../models/user_model.dart';
 import '../services/api_service.dart';
 import '../utils/constants.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class PSColors {
   static const Color primary = Color(0xFF7C4DFF);
@@ -46,7 +47,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _savingSettings = false;
   bool _loadingSettingsProfile = false;
   String? _settingsError;
-
+  bool _soundEnabled = true;
+  static const String _soundPrefKey = 'sound_enabled';
   @override
   void initState() {
     super.initState();
@@ -56,6 +58,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       _fetchProfile();
       _loadAnalytics();
       _loadSettingsProfile();
+      _loadSoundPreference();
     });
   }
 
@@ -66,6 +69,12 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (_analyticsTabs.index == 2) {
       context.read<AnalyticsProvider>().loadRank();
     }
+  }
+
+  Future<void> _toggleSound(bool value) async {
+    setState(() => _soundEnabled = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_soundPrefKey, value);
   }
 
   Future<void> _loadAnalytics({bool force = false}) async {
@@ -105,6 +114,15 @@ class _ProfileScreenState extends State<ProfileScreen>
       }
     } catch (_) {
       if (mounted) setState(() => _loadingSettingsProfile = false);
+    }
+  }
+
+  Future<void> _loadSoundPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _soundEnabled = prefs.getBool(_soundPrefKey) ?? true;
+      });
     }
   }
 
@@ -577,6 +595,43 @@ class _ProfileScreenState extends State<ProfileScreen>
                         );
                       }).toList(),
                       onChanged: (v) => setState(() => _selectedExam = v),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 22),
+                const _PSSectionLabel('Sound Effects'),
+                const SizedBox(height: 10),
+                _FieldShell(
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _soundEnabled
+                              ? Icons.volume_up_rounded
+                              : Icons.volume_off_rounded,
+                          color: PSColors.textSecondary,
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Answer sound effects',
+                            style: TextStyle(
+                                fontFamily: _fontBody,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                                color: PSColors.textPrimary),
+                          ),
+                        ),
+                        Switch(
+                          value: _soundEnabled,
+                          onChanged: _toggleSound,
+                          activeThumbColor: PSColors.primary,
+                          activeTrackColor:
+                              PSColors.primary.withValues(alpha: 0.3),
+                        ),
+                      ],
                     ),
                   ),
                 ),

@@ -1,10 +1,14 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../providers/analytics_provider.dart';
+import '../providers/quiz_provider.dart';
 import '../models/question_model.dart';
 import '../widgets/ps_card.dart';
 import '../services/api_service.dart';
+import 'quiz_screen.dart' show SoundSettings;
 
 class RevisionColors {
   static const primary = Color(0xFF7C4DFF);
@@ -254,7 +258,7 @@ class RevisionQuizScreen extends StatefulWidget {
 }
 
 class _RevisionQuizScreenState extends State<RevisionQuizScreen> {
-  late List<Question> _questions = List.of(widget.questions);
+  late final List<Question> _questions = List.of(widget.questions);
   late final PageController _pageController = PageController();
   final Map<int, int> _selected = {};
   final Set<int> _submitted = {};
@@ -277,6 +281,14 @@ class _RevisionQuizScreenState extends State<RevisionQuizScreen> {
     context.read<AnalyticsProvider>().invalidate();
   }
 
+  void _goToNext() {
+    if (_currentPage >= _questions.length - 1) return;
+    _pageController.nextPage(
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   Future<void> _removeBookmark(int index) async {
     final question = _questions[index];
     try {
@@ -284,12 +296,16 @@ class _RevisionQuizScreenState extends State<RevisionQuizScreen> {
       if (!mounted) return;
       setState(() {
         _questions.removeAt(index);
+        _selected.remove(index);
+        _submitted.remove(index);
         if (_questions.isEmpty) {
           Navigator.of(context).pop();
           return;
         }
         if (_currentPage >= _questions.length) {
           _currentPage = _questions.length - 1;
+          _pageController.jumpToPage(_currentPage);
+        } else {
           _pageController.jumpToPage(_currentPage);
         }
       });
@@ -324,6 +340,9 @@ class _RevisionQuizScreenState extends State<RevisionQuizScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final quizProvider = context.watch<QuizProvider>();
+    final lang = quizProvider.language;
+
     return Scaffold(
       backgroundColor: RevisionColors.background,
       body: SafeArea(
@@ -350,6 +369,11 @@ class _RevisionQuizScreenState extends State<RevisionQuizScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  _LanguageToggle(
+                    language: lang,
+                    onTap: () => context.read<QuizProvider>().toggleLanguage(),
+                  ),
+                  const SizedBox(width: 12),
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -373,23 +397,35 @@ class _RevisionQuizScreenState extends State<RevisionQuizScreen> {
               ),
             ),
             Expanded(
-              child: PageView.builder(
-                controller: _pageController,
-                itemCount: _questions.length,
-                onPageChanged: (i) => setState(() => _currentPage = i),
-                itemBuilder: (context, index) {
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: _RevisionQuestionCard(
-                      question: _questions[index],
-                      selected: _selected[index],
-                      submitted: _submitted.contains(index),
-                      onSelect: (key) => _selectOption(index, key),
-                      onSubmit: () => _submit(index),
-                      onRemove: () => _removeBookmark(index),
+              child: Stack(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: PageView.builder(
+                      controller: _pageController,
+                      itemCount: _questions.length,
+                      onPageChanged: (i) => setState(() => _currentPage = i),
+                      itemBuilder: (context, index) {
+                        return _RevisionQuestionCard(
+                          question: _questions[index],
+                          language: lang,
+                          selected: _selected[index],
+                          submitted: _submitted.contains(index),
+                          onSelect: (key) => _selectOption(index, key),
+                          onSubmit: () => _submit(index),
+                          onRemove: () => _removeBookmark(index),
+                          onNavigateNext: _goToNext,
+                        );
+                      },
                     ),
-                  );
-                },
+                  ),
+                  if (_currentPage < _questions.length - 1)
+                    Positioned(
+                      right: 16,
+                      bottom: 20,
+                      child: _NextButton(onTap: _goToNext),
+                    ),
+                ],
               ),
             ),
           ],
@@ -399,135 +435,607 @@ class _RevisionQuizScreenState extends State<RevisionQuizScreen> {
   }
 }
 
-class _RevisionQuestionCard extends StatelessWidget {
+class _LanguageToggle extends StatelessWidget {
+  final AppLanguage language;
+  final VoidCallback onTap;
+
+  const _LanguageToggle({required this.language, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final isHindi = language == AppLanguage.hindi;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: RevisionColors.card,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.12),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.translate_rounded,
+              color: RevisionColors.textSecondary,
+              size: 15,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              isHindi ? 'हिंदी' : 'English',
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 9.5,
+                fontWeight: FontWeight.w600,
+                color: RevisionColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NextButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _NextButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: RevisionColors.card,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.12),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.keyboard_arrow_right_rounded,
+          color: RevisionColors.textSecondary,
+          size: 24,
+        ),
+      ),
+    );
+  }
+}
+
+class _RevisionQuestionCard extends StatefulWidget {
   final Question question;
+  final AppLanguage language;
   final int? selected;
   final bool submitted;
   final ValueChanged<int> onSelect;
   final VoidCallback onSubmit;
   final VoidCallback onRemove;
+  final VoidCallback onNavigateNext;
 
   const _RevisionQuestionCard({
     required this.question,
+    required this.language,
     required this.selected,
     required this.submitted,
     required this.onSelect,
     required this.onSubmit,
     required this.onRemove,
+    required this.onNavigateNext,
+  });
+
+  @override
+  State<_RevisionQuestionCard> createState() => _RevisionQuestionCardState();
+}
+
+class _RevisionQuestionCardState extends State<_RevisionQuestionCard>
+    with SingleTickerProviderStateMixin {
+  bool _explanationOpen = false;
+  late AnimationController _panelController;
+  late Animation<Offset> _panelSlide;
+  late final AudioPlayer _audioPlayer;
+
+  @override
+  void initState() {
+    super.initState();
+    _audioPlayer = AudioPlayer();
+    _panelController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _panelSlide = Tween<Offset>(
+      begin: const Offset(1.0, 0.0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _panelController,
+      curve: Curves.easeOutCubic,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _panelController.dispose();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  void _openExplanation() {
+    setState(() => _explanationOpen = true);
+    _panelController.forward();
+  }
+
+  void _closeExplanation() {
+    _panelController.reverse().then((_) {
+      if (mounted) setState(() => _explanationOpen = false);
+    });
+  }
+
+  void _closeAndNext() {
+    _panelController.reverse().then((_) {
+      if (mounted) {
+        setState(() => _explanationOpen = false);
+        widget.onNavigateNext();
+      }
+    });
+  }
+
+  Future<void> _onShare() async {
+    final q = widget.question;
+    final correctOpt =
+        q.optionsFor(widget.language)[q.correctAnswer.toString()] ?? '';
+    final shareText =
+        '🎯 PrepSwipe Quiz\n\n📘 ${q.exam} ${q.year} | ${q.subject}${q.topic != null ? ' › ${q.topic}' : ''}\n\n❓ ${q.questionText(widget.language)}\n\n${q.optionList(widget.language).map((o) => '${o.key}. ${o.value}').join('\n')}\n\n✅ Answer: ${q.correctAnswer}. $correctOpt\n\nPractice more PYQs on PrepSwipe 👇\nhttps://play.google.com/store/apps/details?id=com.anuritinnovation.prepswipe';
+    await Share.share(shareText,
+        subject: 'PrepSwipe – ${q.exam} ${q.year} Question');
+  }
+
+  Future<void> _playCorrectSound() async {
+    try {
+      final enabled = await SoundSettings.isEnabled();
+      if (!enabled || !mounted) return;
+      await _audioPlayer.stop();
+      await _audioPlayer.play(AssetSource('music/correct_answer.mp3'));
+    } catch (_) {
+      // Sound playback failure should never block the quiz flow.
+    }
+  }
+
+  void _handleSubmit() {
+    widget.onSubmit();
+    if (widget.selected == widget.question.correctAnswer) {
+      _playCorrectSound();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final explanation = widget.question.explanation(widget.language);
+
+    return LayoutBuilder(
+      builder: (context, outerConstraints) {
+        return SizedBox(
+          height: outerConstraints.maxHeight,
+          width: outerConstraints.maxWidth,
+          child: Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                  child: Container(
+                    height: outerConstraints.maxHeight,
+                    decoration: BoxDecoration(
+                      color: RevisionColors.card.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.06),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: RevisionColors.primary.withValues(alpha: 0.12),
+                          blurRadius: 28,
+                          spreadRadius: -8,
+                          offset: const Offset(0, 12),
+                        ),
+                      ],
+                    ),
+                    child: _ScrollableRevisionCardContent(
+                      question: widget.question,
+                      language: widget.language,
+                      selected: widget.selected,
+                      submitted: widget.submitted,
+                      onSelect: widget.onSelect,
+                      onSubmit: _handleSubmit,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 10,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: _CardActionBar(
+                    onRemove: widget.onRemove,
+                    onExplain: _openExplanation,
+                    onShare: _onShare,
+                  ),
+                ),
+              ),
+              if (_explanationOpen)
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: _closeExplanation,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.35),
+                    ),
+                  ),
+                ),
+              if (_explanationOpen)
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  right: 0,
+                  width: MediaQuery.of(context).size.width * 0.82,
+                  child: SlideTransition(
+                    position: _panelSlide,
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(20),
+                        bottomLeft: Radius.circular(20),
+                        topRight: Radius.circular(24),
+                        bottomRight: Radius.circular(24),
+                      ),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: RevisionColors.card.withValues(alpha: 0.97),
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(20),
+                              bottomLeft: Radius.circular(20),
+                              topRight: Radius.circular(24),
+                              bottomRight: Radius.circular(24),
+                            ),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              width: 1,
+                            ),
+                          ),
+                          child: _ExplanationPanel(
+                            explanation: explanation,
+                            onClose: _closeExplanation,
+                            onNext: _closeAndNext,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ScrollableRevisionCardContent extends StatelessWidget {
+  final Question question;
+  final AppLanguage language;
+  final int? selected;
+  final bool submitted;
+  final ValueChanged<int> onSelect;
+  final VoidCallback onSubmit;
+
+  const _ScrollableRevisionCardContent({
+    required this.question,
+    required this.language,
+    required this.selected,
+    required this.submitted,
+    required this.onSelect,
+    required this.onSubmit,
   });
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-        child: Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: RevisionColors.card.withValues(alpha: 0.72),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.06),
-              width: 1,
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 20, 64, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              PSBadge(
+                  label: question.year.toString(),
+                  color: RevisionColors.secondary),
+              PSBadge(
+                  label: question.subject, color: RevisionColors.textSecondary),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            question.questionText(language),
+            style: const TextStyle(
+              fontFamily: 'Poppins',
+              fontSize: 12.0,
+              fontWeight: FontWeight.w400,
+              color: RevisionColors.textPrimary,
+              height: 1.6,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: RevisionColors.primary.withValues(alpha: 0.12),
-                blurRadius: 28,
-                spreadRadius: -8,
-                offset: const Offset(0, 12),
+          ),
+          const SizedBox(height: 16),
+          ...question.optionList(language).map((opt) {
+            final optKey = int.tryParse(opt.key) ?? 0;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _RevisionOptionTile(
+                optionKey: optKey,
+                optionLabel: opt.key,
+                optionText: opt.value,
+                selected: selected == optKey,
+                submitted: submitted,
+                isCorrect: question.correctAnswer == optKey,
+                onTap: submitted ? null : () => onSelect(optKey),
+              ),
+            );
+          }),
+          const SizedBox(height: 6),
+          if (!submitted) ...[
+            SizedBox(
+              width: double.infinity,
+              child: PSButton(
+                label: 'Submit Answer',
+                icon: Icons.check_rounded,
+                color: selected == null
+                    ? RevisionColors.textTertiary
+                    : RevisionColors.primary,
+                onTap: selected == null ? null : onSubmit,
+              ),
+            ),
+          ] else ...[
+            _RevisionResultCard(
+              isCorrect: selected == question.correctAnswer,
+              correctAnswer:
+                  '${question.correctAnswer}. ${question.optionsFor(language)[question.correctAnswer.toString()] ?? ''}',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ExplanationPanel extends StatelessWidget {
+  final String? explanation;
+  final VoidCallback onClose;
+  final VoidCallback onNext;
+
+  const _ExplanationPanel({
+    required this.explanation,
+    required this.onClose,
+    required this.onNext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 12, 0),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Explanation',
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 12.0,
+                    fontWeight: FontWeight.w600,
+                    color: RevisionColors.textPrimary,
+                  ),
+                ),
+              ),
+              GestureDetector(
+                onTap: onClose,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.06),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: RevisionColors.textSecondary,
+                    size: 18,
+                  ),
+                ),
               ),
             ],
           ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          PSBadge(
-                              label: question.year.toString(),
-                              color: RevisionColors.secondary),
-                          PSBadge(
-                              label: question.subject,
-                              color: RevisionColors.textSecondary),
-                          if (question.topic != null)
-                            PSBadge(
-                                label: question.topic!,
-                                color: RevisionColors.textSecondary),
-                        ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          height: 1,
+          color: Colors.white.withValues(alpha: 0.06),
+        ),
+        Expanded(
+          child: explanation != null && explanation!.isNotEmpty
+              ? SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                  child: Text(
+                    explanation!,
+                    style: const TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w400,
+                      color: RevisionColors.textSecondary,
+                      height: 1.6,
+                    ),
+                  ),
+                )
+              : const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text(
+                      'No explanation available for this question.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w400,
+                        color: RevisionColors.textTertiary,
+                        height: 1.5,
                       ),
                     ),
-                    GestureDetector(
-                      onTap: onRemove,
-                      behavior: HitTestBehavior.opaque,
-                      child: const Padding(
-                        padding: EdgeInsets.all(4),
-                        child: Icon(
-                          Icons.bookmark_remove_rounded,
-                          color: RevisionColors.error,
-                          size: 22,
-                        ),
+                  ),
+                ),
+        ),
+        Container(
+          height: 1,
+          color: Colors.white.withValues(alpha: 0.06),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+          child: SizedBox(
+            width: double.infinity,
+            child: GestureDetector(
+              onTap: onNext,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                decoration: BoxDecoration(
+                  color: RevisionColors.primary.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: RevisionColors.primary.withValues(alpha: 0.35),
+                    width: 1,
+                  ),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Next Question',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: RevisionColors.primary,
                       ),
+                    ),
+                    SizedBox(width: 6),
+                    Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: RevisionColors.primary,
+                      size: 20,
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                Text(
-                  question.questionText,
-                  style: const TextStyle(
-                    fontFamily: 'Poppins',
-                    fontSize: 16,
-                    fontWeight: FontWeight.w400,
-                    color: RevisionColors.textPrimary,
-                    height: 1.6,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ...question.optionList.map((opt) {
-                  final optKey = int.tryParse(opt.key) ?? 0;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _RevisionOptionTile(
-                      optionLabel: opt.key,
-                      optionText: opt.value,
-                      selected: selected == optKey,
-                      submitted: submitted,
-                      isCorrect: question.correctAnswer == optKey,
-                      onTap: submitted ? null : () => onSelect(optKey),
-                    ),
-                  );
-                }),
-                const SizedBox(height: 6),
-                if (!submitted)
-                  SizedBox(
-                    width: double.infinity,
-                    child: PSButton(
-                      label: 'Submit Answer',
-                      icon: Icons.check_rounded,
-                      color: selected == null
-                          ? RevisionColors.textTertiary
-                          : RevisionColors.primary,
-                      onTap: selected == null ? null : onSubmit,
-                    ),
-                  )
-                else
-                  _RevisionResultCard(
-                    isCorrect: selected == question.correctAnswer,
-                    correctAnswer:
-                        '${question.correctAnswer}. ${question.options[question.correctAnswer.toString()] ?? ''}',
-                  ),
-              ],
+              ),
             ),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CardActionBar extends StatelessWidget {
+  final VoidCallback onRemove;
+  final VoidCallback onExplain;
+  final VoidCallback onShare;
+
+  const _CardActionBar({
+    required this.onRemove,
+    required this.onExplain,
+    required this.onShare,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ActionButton(
+          icon: Icons.bookmark_remove_rounded,
+          label: 'Remove',
+          iconColor: RevisionColors.error,
+          onTap: onRemove,
+        ),
+        const SizedBox(height: 20),
+        _ActionButton(
+          icon: Icons.help_outline_rounded,
+          label: 'Explain',
+          iconColor: RevisionColors.textSecondary,
+          onTap: onExplain,
+        ),
+        const SizedBox(height: 20),
+        _ActionButton(
+          icon: Icons.share_rounded,
+          label: 'Share',
+          iconColor: RevisionColors.textSecondary,
+          onTap: onShare,
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color iconColor;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.iconColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 40,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: iconColor, size: 26),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 7.5,
+                fontWeight: FontWeight.w500,
+                color: RevisionColors.textTertiary,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -535,6 +1043,7 @@ class _RevisionQuestionCard extends StatelessWidget {
 }
 
 class _RevisionOptionTile extends StatelessWidget {
+  final int optionKey;
   final String optionLabel;
   final String optionText;
   final bool selected;
@@ -543,6 +1052,7 @@ class _RevisionOptionTile extends StatelessWidget {
   final VoidCallback? onTap;
 
   const _RevisionOptionTile({
+    required this.optionKey,
     required this.optionLabel,
     required this.optionText,
     required this.selected,
@@ -558,8 +1068,9 @@ class _RevisionOptionTile extends StatelessWidget {
           : Colors.white.withValues(alpha: 0.03);
     }
     if (isCorrect) return RevisionColors.success.withValues(alpha: 0.10);
-    if (selected && !isCorrect)
+    if (selected && !isCorrect) {
       return RevisionColors.error.withValues(alpha: 0.10);
+    }
     return Colors.white.withValues(alpha: 0.03);
   }
 
@@ -622,8 +1133,8 @@ class _RevisionOptionTile extends StatelessWidget {
                   optionLabel,
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
+                    fontSize: 9.0,
+                    fontWeight: FontWeight.w700,
                     color: _labelColor(),
                   ),
                 ),
@@ -637,7 +1148,7 @@ class _RevisionOptionTile extends StatelessWidget {
                   optionText,
                   style: TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 14,
+                    fontSize: 10.5,
                     fontWeight: FontWeight.w400,
                     color: submitted && !isCorrect && !selected
                         ? RevisionColors.textTertiary
@@ -665,8 +1176,10 @@ class _RevisionResultCard extends StatelessWidget {
   final bool isCorrect;
   final String correctAnswer;
 
-  const _RevisionResultCard(
-      {required this.isCorrect, required this.correctAnswer});
+  const _RevisionResultCard({
+    required this.isCorrect,
+    required this.correctAnswer,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -693,8 +1206,8 @@ class _RevisionResultCard extends StatelessWidget {
                 isCorrect ? 'Correct! 🎉' : 'Incorrect',
                 style: TextStyle(
                   fontFamily: 'Poppins',
-                  fontSize: 16,
-                  fontWeight: FontWeight.w400,
+                  fontSize: 12.0,
+                  fontWeight: FontWeight.w700,
                   color: color,
                 ),
               ),
@@ -706,8 +1219,8 @@ class _RevisionResultCard extends StatelessWidget {
               'CORRECT ANSWER',
               style: TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 11,
-                fontWeight: FontWeight.w400,
+                fontSize: 8.25,
+                fontWeight: FontWeight.w600,
                 color: RevisionColors.textSecondary,
                 letterSpacing: 0.6,
               ),
@@ -717,7 +1230,7 @@ class _RevisionResultCard extends StatelessWidget {
               correctAnswer,
               style: const TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 14,
+                fontSize: 10.5,
                 fontWeight: FontWeight.w400,
                 color: RevisionColors.textPrimary,
                 height: 1.4,

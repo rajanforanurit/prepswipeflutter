@@ -69,7 +69,7 @@ class NewsApiService {
   }
 
   Future<List<NewsModel>> getCurrentAffairs({String category = 'All'}) async {
-    final base =
+    const base =
         '(UPSC OR "current affairs" OR "government scheme" OR "cabinet approves" OR "ministry of" OR appointment OR committee OR report OR summit OR index OR ranking)';
     final categoryQuery = category.toLowerCase() == 'all'
         ? ''
