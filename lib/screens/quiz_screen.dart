@@ -75,6 +75,12 @@ class SwipeLimiter {
     return count >= maxSwipes;
   }
 
+  static Future<void> reset() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kCountKey);
+    await prefs.remove(_kWindowStartKey);
+  }
+
   static Future<void> _resetIfExpired(SharedPreferences prefs) async {
     final startMillis = prefs.getInt(_kWindowStartKey);
     if (startMillis == null) return;
@@ -107,10 +113,36 @@ class _QuizScreenState extends State<QuizScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _ensureLoaded();
       _loadSwipeState();
+      context
+          .read<AuthProvider>()
+          .setPremiumActivatedListener(_onPremiumUnlocked);
     });
   }
 
+  void _onPremiumUnlocked() async {
+    await SwipeLimiter.reset();
+    if (!mounted) return;
+    setState(() {
+      _swipeCount = 0;
+      _limitReached = false;
+      _timeRemaining = null;
+    });
+    if (Navigator.of(context, rootNavigator: true).canPop()) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+  }
+
   Future<void> _loadSwipeState() async {
+    final auth = context.read<AuthProvider>();
+    if (auth.isPremium) {
+      if (!mounted) return;
+      setState(() {
+        _swipeCount = 0;
+        _limitReached = false;
+        _timeRemaining = null;
+      });
+      return;
+    }
     final count = await SwipeLimiter.getCount();
     final remaining = await SwipeLimiter.getTimeRemaining();
     if (!mounted) return;
@@ -135,6 +167,9 @@ class _QuizScreenState extends State<QuizScreen> {
     setState(() => _currentIndex = index);
     context.read<QuizProvider>().navigateToQuestion(index);
 
+    final auth = context.read<AuthProvider>();
+    if (auth.isPremium) return;
+
     SwipeLimiter.increment().then((updated) {
       if (!mounted) return;
       setState(() {
@@ -151,7 +186,8 @@ class _QuizScreenState extends State<QuizScreen> {
   }
 
   void _goToNext() {
-    if (_limitReached) {
+    final auth = context.read<AuthProvider>();
+    if (_limitReached && !auth.isPremium) {
       _showLimitSheet();
       return;
     }
@@ -166,7 +202,11 @@ class _QuizScreenState extends State<QuizScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (_) => _SwipeLimitSheet(timeRemaining: remaining),
+      isDismissible: true,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: context.read<AuthProvider>(),
+        child: _SwipeLimitSheet(timeRemaining: remaining),
+      ),
     );
   }
 
@@ -179,6 +219,8 @@ class _QuizScreenState extends State<QuizScreen> {
   @override
   Widget build(BuildContext context) {
     final quiz = context.watch<QuizProvider>();
+    final auth = context.watch<AuthProvider>();
+    final blocked = _limitReached && !auth.isPremium;
 
     return Scaffold(
       backgroundColor: QuizColors.background,
@@ -189,8 +231,8 @@ class _QuizScreenState extends State<QuizScreen> {
         QuizState.error when quiz.questions.isEmpty => _ErrorView(
             message: quiz.error ?? 'Something went wrong',
             onRetry: () {
-              final auth = context.read<AuthProvider>();
-              final exam = auth.userProfile?.examType ?? 'UPSC';
+              final authP = context.read<AuthProvider>();
+              final exam = authP.userProfile?.examType ?? 'UPSC';
               quiz.loadQuestions(exam, refresh: true);
             },
           ),
@@ -205,7 +247,7 @@ class _QuizScreenState extends State<QuizScreen> {
                         child: PageView.builder(
                           controller: _pageController,
                           scrollDirection: Axis.horizontal,
-                          physics: _limitReached
+                          physics: blocked
                               ? const NeverScrollableScrollPhysics()
                               : const PageScrollPhysics(),
                           itemCount: quiz.questions.length,
@@ -219,8 +261,8 @@ class _QuizScreenState extends State<QuizScreen> {
                           },
                         ),
                       ),
-                      if (_limitReached) _LimitOverlay(onTap: _showLimitSheet),
-                      if (!_limitReached)
+                      if (blocked) _LimitOverlay(onTap: _showLimitSheet),
+                      if (!blocked)
                         Positioned(
                           right: 16,
                           bottom: 20,
@@ -414,9 +456,7 @@ class _QuestionCardState extends State<_QuestionCard>
       if (!enabled || !mounted) return;
       await _audioPlayer.stop();
       await _audioPlayer.play(AssetSource('music/correct_answer.mp3'));
-    } catch (_) {
-      // Sound playback failure should never block the quiz flow.
-    }
+    } catch (_) {}
   }
 
   Future<void> _submit(BuildContext context, int index) async {
@@ -1152,8 +1192,14 @@ class _SwipeLimitSheet extends StatefulWidget {
 class _SwipeLimitSheetState extends State<_SwipeLimitSheet> {
   late final Duration? _remaining = widget.timeRemaining;
 
+  Future<void> _handleSubscribe() async {
+    final auth = context.read<AuthProvider>();
+    await auth.purchase();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
     final remaining = _remaining ?? Duration.zero;
     final hours = remaining.inHours;
     final minutes = remaining.inMinutes % 60;
@@ -1207,23 +1253,100 @@ class _SwipeLimitSheetState extends State<_SwipeLimitSheet> {
                   height: 1.5,
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 18),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: QuizColors.secondary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: QuizColors.secondary.withValues(alpha: 0.30),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: QuizColors.secondary.withValues(alpha: 0.16),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.workspace_premium_rounded,
+                          color: QuizColors.secondary, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'PrepSwipe Premium',
+                            style: TextStyle(
+                              fontFamily: 'Poppins',
+                              fontSize: 11.25,
+                              fontWeight: FontWeight.w700,
+                              color: QuizColors.textPrimary,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Unlimited swipes, no daily cap',
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 9.0,
+                              color: QuizColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '₹39',
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 14.0,
+                            fontWeight: FontWeight.w800,
+                            color: QuizColors.secondary,
+                          ),
+                        ),
+                        Text(
+                          '/ month',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 8.25,
+                            color: QuizColors.textTertiary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 child: PSButton(
-                  label: 'Upgrade for unlimited access',
+                  label: auth.purchaseLoading
+                      ? 'Processing…'
+                      : 'Subscribe @ ₹39/month',
                   icon: Icons.workspace_premium_rounded,
                   color: QuizColors.secondary,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                  },
+                  onTap: auth.purchaseLoading ? null : _handleSubscribe,
                 ),
               ),
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
                 child: TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: auth.purchaseLoading
+                      ? null
+                      : () => Navigator.of(context).pop(),
                   child: const Text(
                     'Got it',
                     style: TextStyle(

@@ -15,9 +15,9 @@ class ApiService {
   }
 
   Map<String, String> _headers(String? token) => {
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
-      };
+    'Content-Type': 'application/json',
+    if (token != null) 'Authorization': 'Bearer $token',
+  };
 
   Future<bool> healthCheck() async {
     try {
@@ -122,10 +122,7 @@ class ApiService {
         .post(
           Uri.parse('${AppConstants.baseUrl}/test/finish'),
           headers: _headers(token),
-          body: jsonEncode({
-            'sessionId': sessionId,
-            'attempts': attempts,
-          }),
+          body: jsonEncode({'sessionId': sessionId, 'attempts': attempts}),
         )
         .timeout(const Duration(seconds: 30));
 
@@ -151,7 +148,8 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> updateUserProfile(
-      Map<String, dynamic> updates) async {
+    Map<String, dynamic> updates,
+  ) async {
     final token = await _getToken();
     final res = await http
         .patch(
@@ -173,8 +171,9 @@ class ApiService {
 
   Future<bool> checkUserIdAvailable(String userID) async {
     final token = await _getToken();
-    final uri = Uri.parse('${AppConstants.baseUrl}/user/check-userid')
-        .replace(queryParameters: {'userID': userID});
+    final uri = Uri.parse(
+      '${AppConstants.baseUrl}/user/check-userid',
+    ).replace(queryParameters: {'userID': userID});
 
     final res = await http
         .get(uri, headers: _headers(token))
@@ -318,8 +317,9 @@ class ApiService {
     final token = await _getToken();
     final res = await http
         .delete(
-          Uri.parse('${AppConstants.baseUrl}/bookmark/$questionId')
-              .replace(queryParameters: {'collection': collection}),
+          Uri.parse(
+            '${AppConstants.baseUrl}/bookmark/$questionId',
+          ).replace(queryParameters: {'collection': collection}),
           headers: _headers(token),
         )
         .timeout(const Duration(seconds: 10));
@@ -476,13 +476,13 @@ class ApiService {
     int count = 1,
   }) async {
     final token = await _getToken();
-    final uri =
-        Uri.parse('${AppConstants.baseUrl}/did-you-know/random').replace(
-      queryParameters: {
-        if (subject != null) 'subject': subject,
-        'count': count.toString(),
-      },
-    );
+    final uri = Uri.parse('${AppConstants.baseUrl}/did-you-know/random')
+        .replace(
+          queryParameters: {
+            if (subject != null) 'subject': subject,
+            'count': count.toString(),
+          },
+        );
 
     final res = await http
         .get(uri, headers: _headers(token))
@@ -574,13 +574,13 @@ class ApiService {
     int count = 5,
   }) async {
     final token = await _getToken();
-    final uri =
-        Uri.parse('${AppConstants.baseUrl}/today-in-past/random').replace(
-      queryParameters: {
-        if (subject != null) 'subject': subject,
-        'count': count.toString(),
-      },
-    );
+    final uri = Uri.parse('${AppConstants.baseUrl}/today-in-past/random')
+        .replace(
+          queryParameters: {
+            if (subject != null) 'subject': subject,
+            'count': count.toString(),
+          },
+        );
 
     final res = await http
         .get(uri, headers: _headers(token))
@@ -622,5 +622,72 @@ class ApiService {
       return List<String>.from(data['subjects'] ?? []);
     }
     throw Exception('Failed to fetch TIP subjects: ${res.statusCode}');
+  }
+
+  Future<Map<String, dynamic>> getSubscriptionStatus() async {
+    final token = await _getToken();
+    final res = await http
+        .get(
+          Uri.parse('${AppConstants.baseUrl}/subscription/status'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to get subscription status: ${res.statusCode}');
+  }
+
+  Future<void> refreshSubscription() async {
+    final token = await _getToken();
+    final res = await http
+        .post(
+          Uri.parse('${AppConstants.baseUrl}/subscription/refresh'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode != 200) {
+      throw Exception('Failed to refresh subscription: ${res.statusCode}');
+    }
+  }
+
+  Future<Map<String, dynamic>> createSubscription() async {
+    final token = await _getToken();
+    final res = await http
+        .post(
+          Uri.parse('${AppConstants.baseUrl}/subscription/create'),
+          headers: _headers(token),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    }
+    throw Exception('Failed to create subscription: ${res.statusCode}');
+  }
+
+  Future<void> verifySubscription({
+    required String paymentId,
+    required String subscriptionId,
+    required String signature,
+  }) async {
+    final token = await _getToken();
+    final res = await http
+        .post(
+          Uri.parse('${AppConstants.baseUrl}/subscription/verify'),
+          headers: _headers(token),
+          body: jsonEncode({
+            'paymentId': paymentId,
+            'subscriptionId': subscriptionId,
+            'signature': signature,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (res.statusCode != 200) {
+      throw Exception('Failed to verify subscription: ${res.statusCode}');
+    }
   }
 }

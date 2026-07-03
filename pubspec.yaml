@@ -26,6 +26,7 @@ dependencies:
   timeago: ^3.7.1
   url_launcher: ^6.3.1
   audioplayers: ^6.0.0
+  razorpay_flutter: ^1.4.5
 
 dev_dependencies:
   flutter_test:
