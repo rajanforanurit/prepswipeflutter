@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
+import 'package:prepswipe/Timeline/feed_repository.dart';
 import '../utils/app_theme.dart';
 
 const Map<String, Color> _subjectColors = {
@@ -30,13 +30,13 @@ Color _colorForSubject(String subject) {
   return _defaultAccent;
 }
 
-enum _CardType { importantTopic, currentAffair, didYouKnow, todayInHistory }
+// enum _CardType { importantTopic, currentAffair, didYouKnow, todayInHistory }
 
-class _FeedCard {
-  final _CardType type;
-  final Map<String, dynamic> data;
-  _FeedCard({required this.type, required this.data});
-}
+// class _FeedCard {
+//   final _CardType type;
+//   final Map<String, dynamic> data;
+//   _FeedCard({required this.type, required this.data});
+// }
 
 class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
@@ -46,9 +46,9 @@ class FeedScreen extends StatefulWidget {
 }
 
 class _FeedScreenState extends State<FeedScreen> {
-  final ApiService _api = ApiService();
+  //final ApiService _api = ApiService();
 
-  List<_FeedCard> _cards = [];
+  List<FeedCard> _cards = [];
   bool _loading = true;
   String? _error;
 
@@ -58,153 +58,154 @@ class _FeedScreenState extends State<FeedScreen> {
     _loadData();
   }
 
-  Future<List<Map<String, dynamic>>> _fetchAllImportantTopics() async {
-    const pageSize = 1000;
-    final all = <Map<String, dynamic>>[];
-    int skip = 0;
-    while (true) {
-      final res = await _api.getImportantTopics(limit: pageSize, skip: skip);
-      final page = List<Map<String, dynamic>>.from((res)['data'] ?? []);
-      all.addAll(page);
-      if (page.length < pageSize) break;
-      skip += pageSize;
-    }
-    return all;
-  }
+  // Future<List<Map<String, dynamic>>> _fetchAllImportantTopics() async {
+  //   const pageSize = 1000;
+  //   final all = <Map<String, dynamic>>[];
+  //   int skip = 0;
+  //   while (true) {
+  //     final res = await _api.getImportantTopics(limit: pageSize, skip: skip);
+  //     final page = List<Map<String, dynamic>>.from((res)['data'] ?? []);
+  //     all.addAll(page);
+  //     if (page.length < pageSize) break;
+  //     skip += pageSize;
+  //   }
+  //   return all;
+  // }
 
-  Future<List<Map<String, dynamic>>> _fetchAllCurrentAffairs() async {
-    const pageSize = 1000;
-    final all = <Map<String, dynamic>>[];
-    int skip = 0;
-    while (true) {
-      final res = await _api.getCurrentAffairs(limit: pageSize, skip: skip);
-      final page = List<Map<String, dynamic>>.from((res)['data'] ?? []);
-      all.addAll(page);
-      if (page.length < pageSize) break;
-      skip += pageSize;
-    }
-    return all;
-  }
+  // Future<List<Map<String, dynamic>>> _fetchAllCurrentAffairs() async {
+  //   const pageSize = 1000;
+  //   final all = <Map<String, dynamic>>[];
+  //   int skip = 0;
+  //   while (true) {
+  //     final res = await _api.getCurrentAffairs(limit: pageSize, skip: skip);
+  //     final page = List<Map<String, dynamic>>.from((res)['data'] ?? []);
+  //     all.addAll(page);
+  //     if (page.length < pageSize) break;
+  //     skip += pageSize;
+  //   }
+  //   return all;
+  // }
 
-  Future<List<Map<String, dynamic>>> _fetchAllDidYouKnow() async {
-    const pageSize = 1000;
-    final all = <Map<String, dynamic>>[];
-    int skip = 0;
-    while (true) {
-      final res = await _api.getDidYouKnow(limit: pageSize, skip: skip);
-      final page = List<Map<String, dynamic>>.from((res)['data'] ?? []);
-      all.addAll(page);
-      if (page.length < pageSize) break;
-      skip += pageSize;
-    }
-    return all;
-  }
+  // Future<List<Map<String, dynamic>>> _fetchAllDidYouKnow() async {
+  //   const pageSize = 1000;
+  //   final all = <Map<String, dynamic>>[];
+  //   int skip = 0;
+  //   while (true) {
+  //     final res = await _api.getDidYouKnow(limit: pageSize, skip: skip);
+  //     final page = List<Map<String, dynamic>>.from((res)['data'] ?? []);
+  //     all.addAll(page);
+  //     if (page.length < pageSize) break;
+  //     skip += pageSize;
+  //   }
+  //   return all;
+  // }
 
   Future<void> _loadData() async {
     setState(() {
       _loading = true;
       _error = null;
     });
-    try {
-      final results = await Future.wait([
-        _fetchAllImportantTopics(),
-        _fetchAllCurrentAffairs(),
-        _fetchAllDidYouKnow(),
-        _api.getTodayInPastToday(),
-      ]);
+    _cards = await FeedRepository().loadFeed();
+    // try {
+    //   final results = await Future.wait([
+    //     _fetchAllImportantTopics(),
+    //     _fetchAllCurrentAffairs(),
+    //     _fetchAllDidYouKnow(),
+    //     _api.getTodayInPastToday(),
+    //   ]);
 
-      final importantTopics = results[0] as List<Map<String, dynamic>>;
-      final currentAffairs = results[1] as List<Map<String, dynamic>>;
-      final didYouKnow = results[2] as List<Map<String, dynamic>>;
+    //   final importantTopics = results[0] as List<Map<String, dynamic>>;
+    //   final currentAffairs = results[1] as List<Map<String, dynamic>>;
+    //   final didYouKnow = results[2] as List<Map<String, dynamic>>;
 
-      final todayRaw = results[3] as Map<String, dynamic>;
-      final todayItems =
-          List<Map<String, dynamic>>.from(todayRaw['data'] ?? []);
+    //   final todayRaw = results[3] as Map<String, dynamic>;
+    //   final todayItems =
+    //       List<Map<String, dynamic>>.from(todayRaw['data'] ?? []);
 
-      final Map<String, List<Map<String, dynamic>>> tipBySubject = {};
-      for (final item in todayItems) {
-        final subject = item['subject'] as String? ?? 'General';
-        tipBySubject.putIfAbsent(subject, () => []).add(item);
-      }
+    //   final Map<String, List<Map<String, dynamic>>> tipBySubject = {};
+    //   for (final item in todayItems) {
+    //     final subject = item['subject'] as String? ?? 'General';
+    //     tipBySubject.putIfAbsent(subject, () => []).add(item);
+    //   }
 
-      final List<Map<String, dynamic>> todayInHistory =
-          tipBySubject.entries.map((entry) {
-        return {
-          'subject': entry.key,
-          'date': entry.value.isNotEmpty
-              ? (entry.value.first['date'] as String? ?? '')
-              : '',
-          'events': entry.value,
-        };
-      }).toList();
+    //   final List<Map<String, dynamic>> todayInHistory =
+    //       tipBySubject.entries.map((entry) {
+    //     return {
+    //       'subject': entry.key,
+    //       'date': entry.value.isNotEmpty
+    //           ? (entry.value.first['date'] as String? ?? '')
+    //           : '',
+    //       'events': entry.value,
+    //     };
+    //   }).toList();
 
-      _buildCardList(
-          importantTopics, currentAffairs, didYouKnow, todayInHistory);
-      setState(() => _loading = false);
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
+    //   _buildCardList(
+    //       importantTopics, currentAffairs, didYouKnow, todayInHistory);
+    //   setState(() => _loading = false);
+    // } catch (e) {
+    //   setState(() {
+    //     _error = e.toString();
+    //     _loading = false;
+    //   });
+    // }
   }
 
-  void _buildCardList(
-    List<Map<String, dynamic>> importantTopics,
-    List<Map<String, dynamic>> currentAffairs,
-    List<Map<String, dynamic>> didYouKnow,
-    List<Map<String, dynamic>> todayInHistory,
-  ) {
-    final List<_FeedCard> itCards = importantTopics
-        .map((d) => _FeedCard(type: _CardType.importantTopic, data: d))
-        .toList();
-    final List<_FeedCard> caCards = currentAffairs
-        .map((d) => _FeedCard(type: _CardType.currentAffair, data: d))
-        .toList();
-    final List<_FeedCard> dykCards = didYouKnow
-        .map((d) => _FeedCard(type: _CardType.didYouKnow, data: d))
-        .toList();
-    final List<_FeedCard> tipCards = todayInHistory
-        .map((d) => _FeedCard(type: _CardType.todayInHistory, data: d))
-        .toList();
+  // void _buildCardList(
+  //   List<Map<String, dynamic>> importantTopics,
+  //   List<Map<String, dynamic>> currentAffairs,
+  //   List<Map<String, dynamic>> didYouKnow,
+  //   List<Map<String, dynamic>> todayInHistory,
+  // ) {
+  //   final List<_FeedCard> itCards = importantTopics
+  //       .map((d) => _FeedCard(type: _CardType.importantTopic, data: d))
+  //       .toList();
+  //   final List<_FeedCard> caCards = currentAffairs
+  //       .map((d) => _FeedCard(type: _CardType.currentAffair, data: d))
+  //       .toList();
+  //   final List<_FeedCard> dykCards = didYouKnow
+  //       .map((d) => _FeedCard(type: _CardType.didYouKnow, data: d))
+  //       .toList();
+  //   final List<_FeedCard> tipCards = todayInHistory
+  //       .map((d) => _FeedCard(type: _CardType.todayInHistory, data: d))
+  //       .toList();
 
-    _FeedCard? pickFrom(
-      List<_FeedCard> preferred,
-      List<List<_FeedCard>> fallbacks,
-    ) {
-      if (preferred.isNotEmpty) return preferred.removeAt(0);
-      for (final fb in fallbacks) {
-        if (fb.isNotEmpty) return fb.removeAt(0);
-      }
-      return null;
-    }
+  //   _FeedCard? pickFrom(
+  //     List<_FeedCard> preferred,
+  //     List<List<_FeedCard>> fallbacks,
+  //   ) {
+  //     if (preferred.isNotEmpty) return preferred.removeAt(0);
+  //     for (final fb in fallbacks) {
+  //       if (fb.isNotEmpty) return fb.removeAt(0);
+  //     }
+  //     return null;
+  //   }
 
-    final List<_FeedCard> cards = [];
+  //   final List<_FeedCard> cards = [];
 
-    final it = List<_FeedCard>.from(itCards);
-    final ca = List<_FeedCard>.from(caCards);
-    final dyk = List<_FeedCard>.from(dykCards);
-    final tip = List<_FeedCard>.from(tipCards);
+  //   final it = List<_FeedCard>.from(itCards);
+  //   final ca = List<_FeedCard>.from(caCards);
+  //   final dyk = List<_FeedCard>.from(dykCards);
+  //   final tip = List<_FeedCard>.from(tipCards);
 
-    while (it.isNotEmpty || ca.isNotEmpty || dyk.isNotEmpty || tip.isNotEmpty) {
-      final c1 = pickFrom(it, [dyk, ca, tip]);
-      if (c1 != null) cards.add(c1);
+  //   while (it.isNotEmpty || ca.isNotEmpty || dyk.isNotEmpty || tip.isNotEmpty) {
+  //     final c1 = pickFrom(it, [dyk, ca, tip]);
+  //     if (c1 != null) cards.add(c1);
 
-      final c2 = pickFrom(it, [dyk, ca, tip]);
-      if (c2 != null) cards.add(c2);
+  //     final c2 = pickFrom(it, [dyk, ca, tip]);
+  //     if (c2 != null) cards.add(c2);
 
-      final c3 = pickFrom(tip, [dyk, ca, it]);
-      if (c3 != null) cards.add(c3);
+  //     final c3 = pickFrom(tip, [dyk, ca, it]);
+  //     if (c3 != null) cards.add(c3);
 
-      final c4 = pickFrom(ca, [dyk, it, tip]);
-      if (c4 != null) cards.add(c4);
+  //     final c4 = pickFrom(ca, [dyk, it, tip]);
+  //     if (c4 != null) cards.add(c4);
 
-      final c5 = pickFrom(dyk, [it, ca, tip]);
-      if (c5 != null) cards.add(c5);
-    }
+  //     final c5 = pickFrom(dyk, [it, ca, tip]);
+  //     if (c5 != null) cards.add(c5);
+  //   }
 
-    _cards = cards;
-  }
+  //   _cards = cards;
+  // }
 
   @override
   Widget build(BuildContext context) {
@@ -229,7 +230,7 @@ class _FeedScreenState extends State<FeedScreen> {
 }
 
 class _HorizontalFeed extends StatefulWidget {
-  final List<_FeedCard> cards;
+  final List<FeedCard> cards;
   const _HorizontalFeed({required this.cards});
 
   @override
@@ -265,60 +266,60 @@ class _HorizontalFeedState extends State<_HorizontalFeed> {
           child: GestureDetector(
             onTap: () => _toggleFlip(index),
             behavior: HitTestBehavior.opaque,
-            child: _FlipCard(
+            child: FlipCard(
               flipped: flipped,
-              front: _buildFront(card, index),
-              back: _buildBack(card, index),
+              front: buildFront(card, index),
+              back: buildBack(card, index),
             ),
           ),
         );
       },
     );
   }
+}
 
-  Widget _buildFront(_FeedCard card, int index) {
+Widget buildFront(FeedCard card, int index) {
     switch (card.type) {
-      case _CardType.importantTopic:
+      case CardType.importantTopic:
         return _ITFrontCard(data: card.data);
-      case _CardType.currentAffair:
+      case CardType.currentAffair:
         return _CAFrontCard(data: card.data);
-      case _CardType.didYouKnow:
+      case CardType.didYouKnow:
         return _DYKFrontCard(data: card.data);
-      case _CardType.todayInHistory:
+      case CardType.todayInHistory:
         return _TIPFrontCard(data: card.data);
     }
   }
 
-  Widget _buildBack(_FeedCard card, int index) {
+  Widget buildBack(FeedCard card, int index) {
     switch (card.type) {
-      case _CardType.importantTopic:
+      case CardType.importantTopic:
         return _ITBackCard(data: card.data);
-      case _CardType.currentAffair:
+      case CardType.currentAffair:
         return _CABackCard(data: card.data);
-      case _CardType.didYouKnow:
+      case CardType.didYouKnow:
         return _DYKBackCard(data: card.data);
-      case _CardType.todayInHistory:
+      case CardType.todayInHistory:
         return _TIPBackCard(data: card.data);
     }
   }
-}
 
-class _FlipCard extends StatefulWidget {
+class FlipCard extends StatefulWidget {
   final bool flipped;
   final Widget front;
   final Widget back;
 
-  const _FlipCard({
+  const FlipCard({super.key, 
     required this.flipped,
     required this.front,
     required this.back,
   });
 
   @override
-  State<_FlipCard> createState() => _FlipCardState();
+  State<FlipCard> createState() => _FlipCardState();
 }
 
-class _FlipCardState extends State<_FlipCard>
+class _FlipCardState extends State<FlipCard>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
   late Animation<double> _anim;
@@ -334,7 +335,7 @@ class _FlipCardState extends State<_FlipCard>
   }
 
   @override
-  void didUpdateWidget(_FlipCard old) {
+  void didUpdateWidget(FlipCard old) {
     super.didUpdateWidget(old);
     if (widget.flipped != old.flipped) {
       widget.flipped ? _ctrl.forward() : _ctrl.reverse();

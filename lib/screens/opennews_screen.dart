@@ -102,18 +102,26 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
 
   Widget _buildTabBar() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      padding: const EdgeInsets.all(4),
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      //padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.cardBorder),
       ),
+      constraints: const BoxConstraints.expand(height: 35.0),
       child: TabBar(
         controller: _tabController,
         indicator: BoxDecoration(
-          color: AppColors.primary,
+          //color: AppColors.primary,
           borderRadius: BorderRadius.circular(10),
+          border: BoxBorder.all(color: const Color.fromRGBO(124, 77, 255, 1)),
+          boxShadow: [
+            BoxShadow(
+                color: AppColors.primary.withValues(alpha: 0.15),
+                blurRadius: 10,
+                offset: const Offset(0, 2))
+          ],
         ),
         indicatorSize: TabBarIndicatorSize.tab,
         dividerColor: Colors.transparent,
@@ -137,12 +145,13 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
 
   Widget _buildCategoriesBar() {
     return Container(
-      height: 52,
+      height: 25,
       margin: const EdgeInsets.only(top: 12),
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: _categories.length,
+        shrinkWrap: true,
         itemBuilder: (context, index) {
           final category = _categories[index];
           final isSelected = _selectedCategory == category;
@@ -150,29 +159,31 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
           return Padding(
             padding: const EdgeInsets.only(right: 8),
             child: GestureDetector(
-              onTap: () => _onCategorySelected(category),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppColors.primary : AppColors.surface,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color:
-                        isSelected ? AppColors.primary : AppColors.cardBorder,
+                onTap: () => _onCategorySelected(category),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isSelected ? AppColors.primary : AppColors.surface,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: isSelected
+                            ? AppColors.primary
+                            : AppColors.cardBorder),
                   ),
-                ),
-                child: Text(
-                  category,
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    color: isSelected ? Colors.white : AppColors.textSecondary,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  child: Text(
+                    category,
+                    style: TextStyle(
+                      fontFamily: 'SpaceGrotesk',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected
+                          ? AppColors.textPrimary
+                          : AppColors.textSecondary,
+                      letterSpacing: 0.5,
+                    ),
                   ),
-                ),
-              ),
-            ),
+                )),
           );
         },
       ),
@@ -253,7 +264,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
         onTap: () => _showNewsDetail(news),
         borderRadius: BorderRadius.circular(16),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -262,12 +273,12 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                   borderRadius: BorderRadius.circular(10),
                   child: Image.network(
                     news.imageUrl!,
-                    width: 92,
-                    height: 92,
+                    width: 90,
+                    height: 65,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) => Container(
-                      width: 92,
-                      height: 92,
+                      width: 90,
+                      height: 65,
                       color: AppColors.surfaceSecondary,
                       child: const Icon(Icons.image_not_supported,
                           size: 32, color: AppColors.textTertiary),
@@ -276,8 +287,8 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                 )
               else
                 Container(
-                  width: 92,
-                  height: 92,
+                  width: 90,
+                  height: 65,
                   decoration: BoxDecoration(
                     color: AppColors.surfaceSecondary,
                     borderRadius: BorderRadius.circular(10),
@@ -293,8 +304,8 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
                     Text(
                       news.title,
                       style: GoogleFonts.poppins(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
                         color: AppColors.textPrimary,
                         height: 1.3,
                       ),
@@ -351,7 +362,7 @@ class _OpenNewsScreenState extends State<OpenNewsScreen>
     }
     try {
       final Uri uri = Uri.parse(url);
-      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (!await launchUrl(uri, mode: LaunchMode.inAppBrowserView)) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

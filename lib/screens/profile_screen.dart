@@ -1,6 +1,10 @@
 import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:lottie/lottie.dart';
+import 'package:prepswipe/models/question_model.dart';
+import 'package:prepswipe/utils/app_theme.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/analytics_provider.dart';
@@ -9,6 +13,14 @@ import '../models/user_model.dart';
 import '../services/api_service.dart';
 import '../utils/constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+
+// Required imports for loading the initial timeline configuration
+import 'package:prepswipe/providers/timeline_settings_provider.dart';
+import 'package:prepswipe/Timeline/feed_repository.dart';
 
 class PSColors {
   static const Color primary = Color(0xFF7C4DFF);
@@ -41,14 +53,6 @@ class _ProfileScreenState extends State<ProfileScreen>
   Map<String, dynamic>? _profile;
 
   late TabController _analyticsTabs;
-
-  final _userIdController = TextEditingController();
-  String? _selectedExam;
-  bool _savingSettings = false;
-  bool _loadingSettingsProfile = false;
-  String? _settingsError;
-  bool _soundEnabled = true;
-  static const String _soundPrefKey = 'sound_enabled';
   @override
   void initState() {
     super.initState();
@@ -57,8 +61,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchProfile();
       _loadAnalytics();
-      _loadSettingsProfile();
-      _loadSoundPreference();
     });
   }
 
@@ -69,12 +71,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (_analyticsTabs.index == 2) {
       context.read<AnalyticsProvider>().loadRank();
     }
-  }
-
-  Future<void> _toggleSound(bool value) async {
-    setState(() => _soundEnabled = value);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_soundPrefKey, value);
   }
 
   Future<void> _loadAnalytics({bool force = false}) async {
@@ -95,79 +91,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       }
     } catch (_) {
       if (mounted) setState(() => _loadingProfile = false);
-    }
-  }
-
-  Future<void> _loadSettingsProfile() async {
-    final auth = context.read<AuthProvider>();
-    if (!auth.isAuthenticated) return;
-    setState(() => _loadingSettingsProfile = true);
-    try {
-      final data = await ApiService().getUserProfile();
-      final profile = data['profile'] as Map<String, dynamic>? ?? {};
-      if (mounted) {
-        setState(() {
-          _userIdController.text = profile['userID']?.toString() ?? '';
-          _selectedExam = profile['examType']?.toString();
-          _loadingSettingsProfile = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loadingSettingsProfile = false);
-    }
-  }
-
-  Future<void> _loadSoundPreference() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (mounted) {
-      setState(() {
-        _soundEnabled = prefs.getBool(_soundPrefKey) ?? true;
-      });
-    }
-  }
-
-  Future<void> _saveSettings() async {
-    final userId = _userIdController.text.trim();
-    if (userId.isEmpty) {
-      setState(() => _settingsError = 'Please enter a User ID');
-      return;
-    }
-    if (_selectedExam == null) {
-      setState(() => _settingsError = 'Please select an exam type');
-      return;
-    }
-    setState(() {
-      _savingSettings = true;
-      _settingsError = null;
-    });
-    try {
-      await ApiService().updateUserProfile({
-        'userID': userId.toLowerCase(),
-        'examType': _selectedExam,
-      });
-      await context.read<AuthProvider>().refreshProfile();
-      if (mounted) {
-        context.read<QuizProvider>().loadQuestions(_selectedExam!);
-        setState(() => _savingSettings = false);
-        await _fetchProfile();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Settings saved',
-                style: TextStyle(fontFamily: _fontBody)),
-            backgroundColor: PSColors.success,
-            behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _savingSettings = false;
-          _settingsError = e.toString().replaceFirst('Exception: ', '');
-        });
-      }
     }
   }
 
@@ -210,7 +133,6 @@ class _ProfileScreenState extends State<ProfileScreen>
   void dispose() {
     _analyticsTabs.removeListener(_onAnalyticsTabChanged);
     _analyticsTabs.dispose();
-    _userIdController.dispose();
     super.dispose();
   }
 
@@ -218,7 +140,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     await Future.wait([
       _fetchProfile(),
       _loadAnalytics(force: true),
-      _loadSettingsProfile(),
     ]);
   }
 
@@ -248,14 +169,15 @@ class _ProfileScreenState extends State<ProfileScreen>
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            padding: EdgeInsets.fromLTRB(
+                MediaQuery.of(context).size.width < 360 ? 14.0 : 20.0,
+                10,
+                MediaQuery.of(context).size.width < 360 ? 14.0 : 20.0,
+                0),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
                 _buildProfileHeader(context, auth),
-                const SizedBox(height: 28),
-                _sectionTitle(
-                    'Analytics', Icons.bar_chart_rounded, PSColors.primary),
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
               ]),
             ),
           ),
@@ -263,19 +185,6 @@ class _ProfileScreenState extends State<ProfileScreen>
             padding: const EdgeInsets.symmetric(horizontal: 20),
             sliver: SliverToBoxAdapter(
               child: _buildAnalyticsTabs(ap),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 36, 20, 48),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                _sectionTitle(
-                    'Settings', Icons.settings_rounded, PSColors.secondary),
-                const SizedBox(height: 14),
-                _buildSettingsSection(),
-                const SizedBox(height: 40),
-                _buildSignOutButton(context, auth),
-              ]),
             ),
           ),
         ],
@@ -298,6 +207,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         ),
         const SizedBox(width: 10),
         Text(label,
+            textScaler: MediaQuery.textScalerOf(context),
             style: const TextStyle(
                 fontFamily: _fontHeading,
                 fontSize: 18,
@@ -317,19 +227,21 @@ class _ProfileScreenState extends State<ProfileScreen>
                 ? user.displayName!.trim()
                 : user.email?.split('@').first ?? 'User');
 
-    final email = user.email ?? '';
+    final userId = _profile?['userID']?.toString() ?? '';
     final examType = _profile?['examType']?.toString();
     final avatarLetter =
         displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U';
 
-    return _GlassCard(
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
-      glowColor: PSColors.primary,
-      child: Column(
+    final width = MediaQuery.of(context).size.width;
+    bool small = width < 400;
+
+    return GlassCard(
+      padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 20),
+      child: Row(
         children: [
           Container(
-            width: 92,
-            height: 92,
+            width: small ? 50 : 60,
+            height: small ? 50 : 60,
             padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
@@ -357,57 +269,114 @@ class _ProfileScreenState extends State<ProfileScreen>
               ),
             ),
           ),
-          const SizedBox(height: 18),
-          Text(displayName,
-              style: const TextStyle(
-                  fontFamily: _fontHeading,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  color: PSColors.textPrimary,
-                  letterSpacing: -0.3),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 4),
-          Text(
-            email.isNotEmpty ? email : 'No email',
-            style: const TextStyle(
-                fontFamily: _fontBody,
-                fontSize: 13,
-                color: PSColors.textSecondary),
-          ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-            decoration: BoxDecoration(
-              color: examType != null
-                  ? PSColors.secondary.withValues(alpha: 0.14)
-                  : Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: examType != null
-                    ? PSColors.secondary.withValues(alpha: 0.4)
-                    : Colors.white.withValues(alpha: 0.12),
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.school_rounded,
-                    size: 14,
+          const SizedBox(width: 18),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                small
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(displayName,
+                              style: const TextStyle(
+                                  fontFamily: _fontHeading,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: PSColors.textPrimary,
+                                  letterSpacing: -0.3),
+                              textAlign: TextAlign.center),
+                          Text("@$userId",
+                              style: const TextStyle(
+                                  fontFamily: _fontHeading,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: PSColors.textSecondary,
+                                  letterSpacing: -0.3),
+                              textAlign: TextAlign.center),
+                        ],
+                      )
+                    : Row(
+                        children: [
+                          Text(displayName,
+                              style: const TextStyle(
+                                  fontFamily: _fontHeading,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: PSColors.textPrimary,
+                                  letterSpacing: -0.3),
+                              textAlign: TextAlign.center),
+                          Text(" | @$userId",
+                              style: const TextStyle(
+                                  fontFamily: _fontHeading,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: PSColors.textSecondary,
+                                  letterSpacing: -0.3),
+                              textAlign: TextAlign.center),
+                        ],
+                      ),
+                const SizedBox(height: 4),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  decoration: BoxDecoration(
                     color: examType != null
-                        ? PSColors.secondary
-                        : PSColors.textTertiary),
-                const SizedBox(width: 6),
-                Text(
-                  examType ?? 'No exam selected',
-                  style: TextStyle(
-                      fontFamily: _fontBody,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                        ? PSColors.secondary.withValues(alpha: 0.14)
+                        : Colors.white.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
                       color: examType != null
-                          ? PSColors.secondary
-                          : PSColors.textTertiary),
+                          ? PSColors.secondary.withValues(alpha: 0.4)
+                          : Colors.white.withValues(alpha: 0.12),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.school_rounded,
+                          size: 12,
+                          color: examType != null
+                              ? PSColors.secondary
+                              : PSColors.textTertiary),
+                      const SizedBox(width: 6),
+                      Text(
+                        examType ?? 'No exam selected',
+                        style: TextStyle(
+                            fontFamily: _fontBody,
+                            fontSize: small ? 10 : 11,
+                            fontWeight: FontWeight.w600,
+                            color: examType != null
+                                ? PSColors.secondary
+                                : PSColors.textTertiary),
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              ])),
+          InkWell(
+            child: GestureDetector(
+              onTap: () => showModalBottomSheet(
+                  context: context,
+                  isDismissible: true,
+                  isScrollControlled: true,
+                  builder: (context) => SettingsBottomSheet(
+                        sectiontitle: _sectionTitle('Settings',
+                            Icons.settings_rounded, PSColors.secondary),
+                        signoutbutton: _buildSignOutButton(context, auth),
+                      )),
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: AppColors.textSecondary.withValues(alpha: 0.3)),
+                ),
+                child: const Icon(Icons.settings_rounded,
+                    size: 18, color: AppColors.textPrimary),
+              ),
             ),
           ),
         ],
@@ -416,7 +385,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Widget _buildAnalyticsTabs(AnalyticsProvider ap) {
-    return _GlassCard(
+    return GlassCard(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -429,6 +398,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     color: Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(12),
                   ),
+                  constraints: const BoxConstraints.expand(height: 33.0),
                   child: TabBar(
                     controller: _analyticsTabs,
                     labelStyle: const TextStyle(
@@ -442,22 +412,21 @@ class _ProfileScreenState extends State<ProfileScreen>
                     labelColor: Colors.white,
                     unselectedLabelColor: PSColors.textSecondary,
                     indicator: BoxDecoration(
-                      gradient: const LinearGradient(
-                          colors: [PSColors.primary, Color(0xFF9C6FFF)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight),
                       borderRadius: BorderRadius.circular(10),
+                      border: BoxBorder.all(color: PSColors.primary),
                       boxShadow: [
                         BoxShadow(
-                            color: PSColors.primary.withValues(alpha: 0.35),
+                            color: PSColors.primary.withValues(alpha: 0.15),
                             blurRadius: 10,
                             offset: const Offset(0, 2))
                       ],
                     ),
                     indicatorSize: TabBarIndicatorSize.tab,
-                    dividerColor: Colors.transparent,
+                    dividerColor: const Color.fromRGBO(0, 0, 0, 0),
                     tabs: const [
-                      Tab(text: 'Overview'),
+                      Tab(
+                        text: 'Overview',
+                      ),
                       Tab(text: 'Subjects'),
                       Tab(text: 'Rank'),
                     ],
@@ -518,170 +487,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-  Widget _buildSettingsSection() {
-    return _GlassCard(
-      padding: const EdgeInsets.all(20),
-      child: _loadingSettingsProfile
-          ? const _PSLoader(message: 'Loading profile…')
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _PSSectionLabel('User ID'),
-                const SizedBox(height: 10),
-                _FieldShell(
-                  child: TextField(
-                    controller: _userIdController,
-                    style: const TextStyle(
-                        fontFamily: _fontBody,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        color: PSColors.textPrimary),
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. aspirant2025',
-                      hintStyle: TextStyle(
-                          fontFamily: _fontBody, color: PSColors.textTertiary),
-                      prefixIcon: Icon(Icons.person_outline_rounded,
-                          color: PSColors.textSecondary),
-                      border: InputBorder.none,
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'This will be your unique identity on the leaderboard.',
-                  style: TextStyle(
-                      fontFamily: _fontBody,
-                      fontSize: 12,
-                      color: PSColors.textSecondary),
-                ),
-                const SizedBox(height: 22),
-                const _PSSectionLabel('Target Exam'),
-                const SizedBox(height: 10),
-                _FieldShell(
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: _selectedExam,
-                      isExpanded: true,
-                      hint: const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16),
-                        child: Text('Select your target exam',
-                            style: TextStyle(
-                                fontFamily: _fontBody,
-                                color: PSColors.textTertiary,
-                                fontSize: 15)),
-                      ),
-                      icon: const Padding(
-                        padding: EdgeInsets.only(right: 12),
-                        child: Icon(Icons.keyboard_arrow_down_rounded,
-                            color: PSColors.textSecondary),
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      dropdownColor: PSColors.card,
-                      items: AppConstants.examTypes.map((exam) {
-                        return DropdownMenuItem(
-                          value: exam,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            child: Text(exam,
-                                style: const TextStyle(
-                                    fontFamily: _fontBody,
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w500,
-                                    color: PSColors.textPrimary)),
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (v) => setState(() => _selectedExam = v),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 22),
-                const _PSSectionLabel('Sound Effects'),
-                const SizedBox(height: 10),
-                _FieldShell(
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: Row(
-                      children: [
-                        Icon(
-                          _soundEnabled
-                              ? Icons.volume_up_rounded
-                              : Icons.volume_off_rounded,
-                          color: PSColors.textSecondary,
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Text(
-                            'Answer sound effects',
-                            style: TextStyle(
-                                fontFamily: _fontBody,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w500,
-                                color: PSColors.textPrimary),
-                          ),
-                        ),
-                        Switch(
-                          value: _soundEnabled,
-                          onChanged: _toggleSound,
-                          activeThumbColor: PSColors.primary,
-                          activeTrackColor:
-                              PSColors.primary.withValues(alpha: 0.3),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 26),
-                if (_settingsError != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: PSColors.error.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                          color: PSColors.error.withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error_outline_rounded,
-                            color: PSColors.error, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(_settingsError!,
-                              style: const TextStyle(
-                                  fontFamily: _fontBody,
-                                  color: PSColors.error,
-                                  fontSize: 13)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-                SizedBox(
-                  width: double.infinity,
-                  child: _savingSettings
-                      ? const Center(
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(vertical: 10),
-                            child: CircularProgressIndicator(
-                                color: PSColors.primary, strokeWidth: 2.5),
-                          ),
-                        )
-                      : _PSButton(
-                          label: 'Save',
-                          icon: Icons.check_rounded,
-                          onTap: _saveSettings),
-                ),
-              ],
-            ),
-    );
-  }
-
   Widget _buildSignOutButton(BuildContext context, AuthProvider auth) {
     return GestureDetector(
       onTap: () => _confirmSignOut(context, auth),
@@ -693,13 +498,14 @@ class _ProfileScreenState extends State<ProfileScreen>
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: PSColors.error.withValues(alpha: 0.3)),
         ),
-        child: const Row(
+        child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.logout_rounded, color: PSColors.error, size: 18),
-            SizedBox(width: 10),
+            const Icon(Icons.logout_rounded, color: PSColors.error, size: 18),
+            const SizedBox(width: 10),
             Text('Sign Out',
-                style: TextStyle(
+                textScaler: MediaQuery.textScalerOf(context),
+                style: const TextStyle(
                     fontFamily: _fontBody,
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
@@ -711,12 +517,12 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 }
 
-class _GlassCard extends StatelessWidget {
+class GlassCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final Color? glowColor;
 
-  const _GlassCard(
+  const GlassCard(
       {required this.child,
       this.padding = const EdgeInsets.all(16),
       this.glowColor});
@@ -784,11 +590,13 @@ class _PSSectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final small = MediaQuery.of(context).size.width < 360;
     return Text(
       label.toUpperCase(),
-      style: const TextStyle(
+      textScaler: MediaQuery.textScalerOf(context),
+      style: TextStyle(
           fontFamily: _fontBody,
-          fontSize: 11.5,
+          fontSize: small ? 9.5 : 11.5,
           fontWeight: FontWeight.w700,
           color: PSColors.textTertiary,
           letterSpacing: 0.8),
@@ -834,6 +642,7 @@ class _PSButton extends StatelessWidget {
                 const SizedBox(width: 8),
               ],
               Text(label,
+                  textScaler: MediaQuery.textScalerOf(context),
                   style: const TextStyle(
                       fontFamily: _fontHeading,
                       fontSize: 15,
@@ -861,6 +670,7 @@ class _PSBadge extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: color.withValues(alpha: 0.35))),
       child: Text(label,
+          textScaler: MediaQuery.textScalerOf(context),
           style: TextStyle(
               fontFamily: _fontBody,
               fontSize: 12,
@@ -884,6 +694,7 @@ class _PSLoader extends StatelessWidget {
               color: PSColors.primary, strokeWidth: 2.5),
           const SizedBox(height: 14),
           Text(message,
+              textScaler: MediaQuery.textScalerOf(context),
               style: const TextStyle(
                   fontFamily: _fontBody,
                   fontSize: 13,
@@ -921,6 +732,7 @@ class _PSEmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(title,
+                textScaler: MediaQuery.textScalerOf(context),
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                     fontFamily: _fontHeading,
@@ -930,6 +742,7 @@ class _PSEmptyState extends StatelessWidget {
             if (subtitle != null) ...[
               const SizedBox(height: 6),
               Text(subtitle!,
+                  textScaler: MediaQuery.textScalerOf(context),
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                       fontFamily: _fontBody,
@@ -956,6 +769,7 @@ class _AvatarFallback extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Text(letter,
+          textScaler: MediaQuery.textScalerOf(context),
           style: const TextStyle(
               fontFamily: _fontHeading,
               fontSize: 32,
@@ -1006,128 +820,217 @@ class _OverviewTabInline extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _GlassCard(
-          glowColor: PSColors.primary,
-          padding: const EdgeInsets.all(20),
-          child: Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                      colors: [PSColors.primary, Color(0xFF9C6FFF)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight),
-                  borderRadius: BorderRadius.circular(14),
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color.fromARGB(255, 178, 77, 255)),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Row(
+              children: [
+                SizedBox(
+                    width: 50,
+                    height: 50,
+                    child: LottieBuilder.asset(
+                        "assets/animatedicons/Streak Fire.json")),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${summary.currentStreak} Day Streak 🔥',
+                          textScaler: MediaQuery.textScalerOf(context),
+                          style: const TextStyle(
+                              fontFamily: _fontHeading,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: PSColors.textPrimary)),
+                      const SizedBox(height: 2),
+                      Text('Best: ${summary.longestStreak} days',
+                          textScaler: MediaQuery.textScalerOf(context),
+                          style: const TextStyle(
+                              fontFamily: _fontBody,
+                              fontSize: 11,
+                              color: PSColors.textSecondary)),
+                    ],
+                  ),
                 ),
-                child: const Icon(Icons.local_fire_department_rounded,
-                    color: Colors.white, size: 28),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('${summary.currentStreak} Day Streak 🔥',
-                        style: const TextStyle(
-                            fontFamily: _fontHeading,
-                            fontSize: 19,
-                            fontWeight: FontWeight.w700,
-                            color: PSColors.textPrimary)),
-                    const SizedBox(height: 2),
-                    Text('Best: ${summary.longestStreak} days',
-                        style: const TextStyle(
-                            fontFamily: _fontBody,
-                            fontSize: 13,
-                            color: PSColors.textSecondary)),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 10),
         const _PSSectionLabel('Performance'),
-        const SizedBox(height: 12),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 1.4,
-          children: [
-            _MetricTile(
-                value: summary.totalAttempted.toString(),
-                label: 'Attempted',
-                accentColor: PSColors.primary,
-                icon: Icons.quiz_outlined),
-            _MetricTile(
-                value: '${summary.overallAccuracy.toStringAsFixed(1)}%',
-                label: 'Accuracy',
-                accentColor: PSColors.success,
-                icon: Icons.percent_rounded),
-            _MetricTile(
-                value: summary.totalCorrect.toString(),
-                label: 'Correct',
-                accentColor: PSColors.success,
-                icon: Icons.check_circle_outline),
-            _MetricTile(
-                value: summary.totalIncorrect.toString(),
-                label: 'Incorrect',
-                accentColor: PSColors.error,
-                icon: Icons.cancel_outlined),
-            _MetricTile(
-                value: summary.totalSkipped.toString(),
-                label: 'Skipped',
-                accentColor: PSColors.secondary,
-                icon: Icons.skip_next_outlined),
-            _MetricTile(
-                value: _formatTime(summary.avgResponseTimeSeconds.toInt()),
-                label: 'Avg Time/Q',
-                accentColor: PSColors.cyan,
-                icon: Icons.timer_outlined),
-          ],
-        ),
-        const SizedBox(height: 20),
-        const _PSSectionLabel('Accuracy Breakdown'),
-        const SizedBox(height: 12),
-        _GlassCard(
-          padding: const EdgeInsets.all(20),
-          child: Column(
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.fromLTRB(15, 10, 15, 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _AccuracyBar(
-                  label: 'Correct',
-                  value: summary.totalCorrect,
-                  total: summary.totalAttempted,
-                  color: PSColors.success),
-              const SizedBox(height: 12),
-              _AccuracyBar(
-                  label: 'Incorrect',
-                  value: summary.totalIncorrect,
-                  total: summary.totalAttempted,
-                  color: PSColors.error),
-              const SizedBox(height: 12),
-              _AccuracyBar(
-                  label: 'Skipped',
-                  value: summary.totalSkipped,
-                  total: summary.totalAttempted,
-                  color: PSColors.secondary),
+              _CircularProgress(
+                  value: summary.overallAccuracy,
+                  total: 100,
+                  insidetext: "${summary.overallAccuracy.toInt()}%",
+                  label: "Accuracy",
+                  accentColor: AppColors.accent),
+              const SizedBox(height: 10),
+              _CircularProgress(
+                  value: summary.totalCorrect.toDouble(),
+                  total: summary.totalAttempted.toDouble(),
+                  insidetext: summary.totalCorrect.toString(),
+                  label: "Correct",
+                  accentColor: PSColors.success),
+              const SizedBox(height: 10),
+              _CircularProgress(
+                  value: summary.totalIncorrect.toDouble(),
+                  total: summary.totalAttempted.toDouble(),
+                  insidetext: summary.totalIncorrect.toString(),
+                  label: "Incorrect",
+                  accentColor: PSColors.error),
             ],
           ),
         ),
+        const SizedBox(
+          height: 10,
+        ),
+        Container(
+          decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.cardBorder),
+              color: PSColors.card.withValues(alpha: 0.6)),
+          child: ClipRRect(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(15, 10, 15, 0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                                color: PSColors.primary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(9)),
+                            child: const Icon(Icons.quiz_outlined,
+                                size: 16, color: PSColors.primary),
+                          ),
+                          const SizedBox(width: 8),
+                          Text("Attempted",
+                              textScaler: MediaQuery.textScalerOf(context),
+                              style: const TextStyle(
+                                  fontFamily: _fontBody,
+                                  fontSize: 13,
+                                  color: PSColors.textSecondary)),
+                        ],
+                      ),
+                      Text(summary.totalAttempted.toString(),
+                          textScaler: MediaQuery.textScalerOf(context),
+                          style: const TextStyle(
+                              fontFamily: _fontHeading,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: PSColors.textPrimary)),
+                    ],
+                  ),
+                ),
+                const Divider(
+                  color: AppColors.cardBorder,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(15, 5, 15, 0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                                color:
+                                    AppColors.secondary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(9)),
+                            child: const Icon(Icons.skip_next_outlined,
+                                size: 16, color: AppColors.secondary),
+                          ),
+                          const SizedBox(width: 8),
+                          Text("Skipped",
+                              textScaler: MediaQuery.textScalerOf(context),
+                              style: const TextStyle(
+                                  fontFamily: _fontBody,
+                                  fontSize: 13,
+                                  color: PSColors.textSecondary)),
+                        ],
+                      ),
+                      Text(summary.totalSkipped.toString(),
+                          textScaler: MediaQuery.textScalerOf(context),
+                          style: const TextStyle(
+                              fontFamily: _fontHeading,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: PSColors.textPrimary)),
+                    ],
+                  ),
+                ),
+                const Divider(
+                  color: AppColors.cardBorder,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(15, 5, 15, 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                                color: PSColors.cyan.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(9)),
+                            child: const Icon(Icons.timer_outlined,
+                                size: 16, color: PSColors.cyan),
+                          ),
+                          const SizedBox(width: 8),
+                          Text("Avg Time/Q",
+                              textScaler: MediaQuery.textScalerOf(context),
+                              style: const TextStyle(
+                                  fontFamily: _fontBody,
+                                  fontSize: 13,
+                                  color: PSColors.textSecondary)),
+                        ],
+                      ),
+                      Text(_formatTime(summary.avgResponseTimeSeconds.toInt()),
+                          textScaler: MediaQuery.textScalerOf(context),
+                          style: const TextStyle(
+                              fontFamily: _fontHeading,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: PSColors.textPrimary)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 15),
         if (summary.totalStudyTimeSeconds > 0) ...[
-          const SizedBox(height: 20),
+          const SizedBox(height: 15),
           const _PSSectionLabel('Study Time'),
-          const SizedBox(height: 12),
-          _GlassCard(
-            padding: const EdgeInsets.all(20),
+          const SizedBox(height: 10),
+          GlassCard(
+            padding: const EdgeInsets.all(10),
             child: Row(
               children: [
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                       color: PSColors.cyan.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12)),
@@ -1139,13 +1042,15 @@ class _OverviewTabInline extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(_formatTime(summary.totalStudyTimeSeconds),
+                        textScaler: MediaQuery.textScalerOf(context),
                         style: const TextStyle(
                             fontFamily: _fontHeading,
-                            fontSize: 21,
+                            fontSize: 18,
                             fontWeight: FontWeight.w700,
                             color: PSColors.textPrimary)),
-                    const Text('Total study time',
-                        style: TextStyle(
+                    Text('Total study time',
+                        textScaler: MediaQuery.textScalerOf(context),
+                        style: const TextStyle(
                             fontFamily: _fontBody,
                             fontSize: 12,
                             color: PSColors.textSecondary)),
@@ -1159,7 +1064,7 @@ class _OverviewTabInline extends StatelessWidget {
           const SizedBox(height: 20),
           const _PSSectionLabel('Performance Trend'),
           const SizedBox(height: 12),
-          _GlassCard(
+          GlassCard(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
             child: _TrendChart(trend: summary.performanceTrend),
           ),
@@ -1194,109 +1099,58 @@ class _OverviewTabInline extends StatelessWidget {
   }
 }
 
-class _MetricTile extends StatelessWidget {
-  final String value;
+class _CircularProgress extends StatelessWidget {
+  final double value;
+  final double total;
+  final String insidetext;
   final String label;
   final Color accentColor;
-  final IconData icon;
-
-  const _MetricTile(
+  const _CircularProgress(
       {required this.value,
       required this.label,
       required this.accentColor,
-      required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.035),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.06))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-                color: accentColor.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(9)),
-            child: Icon(icon, size: 16, color: accentColor),
-          ),
-          const Spacer(),
-          Text(value,
-              style: const TextStyle(
-                  fontFamily: _fontHeading,
-                  fontSize: 19,
-                  fontWeight: FontWeight.w700,
-                  color: PSColors.textPrimary)),
-          Text(label,
-              style: const TextStyle(
-                  fontFamily: _fontBody,
-                  fontSize: 11.5,
-                  color: PSColors.textSecondary)),
-        ],
-      ),
-    );
-  }
-}
-
-class _AccuracyBar extends StatelessWidget {
-  final String label;
-  final int value;
-  final int total;
-  final Color color;
-
-  const _AccuracyBar(
-      {required this.label,
-      required this.value,
       required this.total,
-      required this.color});
+      required this.insidetext});
 
   @override
   Widget build(BuildContext context) {
     final pct = total > 0 ? value / total : 0.0;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Stack(
+          alignment: Alignment.center,
           children: [
-            Row(children: [
-              Container(
-                  width: 8,
-                  height: 8,
-                  decoration:
-                      BoxDecoration(color: color, shape: BoxShape.circle)),
-              const SizedBox(width: 8),
-              Text(label,
-                  style: const TextStyle(
-                      fontFamily: _fontBody,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: PSColors.textSecondary)),
-            ]),
-            Text('$value (${(pct * 100).toStringAsFixed(1)}%)',
-                style: const TextStyle(
-                    fontFamily: _fontBody,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: PSColors.textPrimary)),
+            SizedBox(
+              width: 60,
+              height: 60,
+              child: CircularProgressIndicator(
+                value: pct,
+                strokeWidth: 6.0,
+                backgroundColor: accentColor.withValues(alpha: 0.4),
+                strokeCap: StrokeCap.round,
+                color: Colors.white,
+                valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+              ),
+            ),
+            Text(
+              insidetext,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: PSColors.textPrimary,
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: pct,
-            minHeight: 6,
-            backgroundColor: Colors.white.withValues(alpha: 0.06),
-            valueColor: AlwaysStoppedAnimation<Color>(color),
+        const SizedBox(height: 10),
+        Text(
+          label,
+          style: const TextStyle(
+            fontFamily: _fontHeading,
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
           ),
-        ),
+        )
       ],
     );
   }
@@ -1329,6 +1183,7 @@ class _SubjectGroup extends StatelessWidget {
             Icon(icon, size: 14, color: color),
             const SizedBox(width: 6),
             Text(title,
+                textScaler: MediaQuery.textScalerOf(context),
                 style: TextStyle(
                     fontFamily: _fontBody,
                     fontSize: 12,
@@ -1338,8 +1193,9 @@ class _SubjectGroup extends StatelessWidget {
           ]),
           const SizedBox(height: 8),
           if (subjects.isEmpty)
-            const Text('Not enough data yet',
-                style: TextStyle(
+            Text('Not enough data yet',
+                textScaler: MediaQuery.textScalerOf(context),
+                style: const TextStyle(
                     fontFamily: _fontBody,
                     fontSize: 11,
                     color: PSColors.textTertiary))
@@ -1347,6 +1203,7 @@ class _SubjectGroup extends StatelessWidget {
             ...subjects.map((s) => Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text('• $s',
+                      textScaler: MediaQuery.textScalerOf(context),
                       style: const TextStyle(
                           fontFamily: _fontBody,
                           fontSize: 12,
@@ -1366,11 +1223,12 @@ class _TrendChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (trend.length < 2) {
-      return const SizedBox(
+      return SizedBox(
         height: 100,
         child: Center(
           child: Text('Need more data to show trend',
-              style: TextStyle(
+              textScaler: MediaQuery.textScalerOf(context),
+              style: const TextStyle(
                   fontFamily: _fontBody,
                   color: PSColors.textSecondary,
                   fontSize: 13)),
@@ -1392,11 +1250,13 @@ class _TrendChart extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(trend.first['date']?.toString() ?? '',
+                textScaler: MediaQuery.textScalerOf(context),
                 style: const TextStyle(
                     fontFamily: _fontBody,
                     fontSize: 10,
                     color: PSColors.textTertiary)),
             Text(trend.last['date']?.toString() ?? '',
+                textScaler: MediaQuery.textScalerOf(context),
                 style: const TextStyle(
                     fontFamily: _fontBody,
                     fontSize: 10,
@@ -1503,7 +1363,7 @@ class _SubjectsTabInline extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.035),
                 borderRadius: BorderRadius.circular(16),
@@ -1515,6 +1375,7 @@ class _SubjectsTabInline extends StatelessWidget {
                 Row(children: [
                   Expanded(
                       child: Text(key,
+                          textScaler: MediaQuery.textScalerOf(context),
                           style: const TextStyle(
                               fontFamily: _fontHeading,
                               fontSize: 15,
@@ -1536,18 +1397,21 @@ class _SubjectsTabInline extends StatelessWidget {
                 const SizedBox(height: 8),
                 Row(children: [
                   Text('$attempted attempted',
+                      textScaler: MediaQuery.textScalerOf(context),
                       style: const TextStyle(
                           fontFamily: _fontBody,
                           fontSize: 12,
                           color: PSColors.textSecondary)),
                   const SizedBox(width: 12),
                   Text('$correct correct',
+                      textScaler: MediaQuery.textScalerOf(context),
                       style: const TextStyle(
                           fontFamily: _fontBody,
                           fontSize: 12,
                           color: PSColors.success)),
                   const SizedBox(width: 12),
                   Text('${attempted - correct} incorrect',
+                      textScaler: MediaQuery.textScalerOf(context),
                       style: const TextStyle(
                           fontFamily: _fontBody,
                           fontSize: 12,
@@ -1572,6 +1436,7 @@ class _RankTabInline extends StatefulWidget {
 
 class _RankTabInlineState extends State<_RankTabInline> {
   bool _rankLoaded = false;
+  final GlobalKey _shareCardKey = GlobalKey();
 
   @override
   void initState() {
@@ -1582,6 +1447,38 @@ class _RankTabInlineState extends State<_RankTabInline> {
         widget.ap.loadRank();
       }
     });
+  }
+
+  Future<void> _shareRankCard(Map<String, dynamic> rankData) async {
+    try {
+      final boundary = _shareCardKey.currentContext!.findRenderObject()
+          as RenderRepaintBoundary;
+
+      final image = await boundary.toImage(pixelRatio: 3);
+
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+
+      final pngBytes = byteData!.buffer.asUint8List();
+
+      final dir = await getTemporaryDirectory();
+
+      final file = File("${dir.path}/prepswipe_rank.png");
+
+      await file.writeAsBytes(pngBytes);
+
+      final rank = rankData["rank"];
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: "🏆 I'm ranked #$rank on PrepSwipe!\n\n"
+            "Can you beat my rank?\n\n"
+            "Boost your UPSC / PSC preparation with AI-powered practice questions, analytics and leaderboards.\n\n"
+            "📲 Download PrepSwipe:\n"
+            "https://play.google.com/store/apps/details?id=com.anuritinnovation.prepswipe",
+      );
+    } catch (e) {
+      debugPrint(e.toString());
+    }
   }
 
   @override
@@ -1610,53 +1507,86 @@ class _RankTabInlineState extends State<_RankTabInline> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (hasRank) ...[
-          _GlassCard(
-            glowColor: PSColors.secondary,
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                const Icon(Icons.military_tech_rounded,
-                    color: PSColors.secondary, size: 48),
-                const SizedBox(height: 12),
-                Text('#${rankData['rank']}',
-                    style: const TextStyle(
-                        fontFamily: _fontHeading,
-                        fontSize: 34,
-                        fontWeight: FontWeight.w800,
-                        color: PSColors.secondary)),
-                const Text('Your Rank',
-                    style: TextStyle(
-                        fontFamily: _fontBody,
-                        fontSize: 14,
-                        color: PSColors.textSecondary)),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _RankStat(
-                        label: 'Total Marks',
-                        value: (rankData['totalMarks'] as num?)
-                                ?.toStringAsFixed(1) ??
-                            '0',
-                        color: PSColors.success),
-                    _RankStat(
-                        label: 'Correct',
-                        value: '${rankData['totalCorrect'] ?? 0}',
-                        color: PSColors.primary),
-                    _RankStat(
-                        label: 'Percentile',
-                        value: '${rankData['percentile'] ?? 0}%',
-                        color: PSColors.cyan),
-                  ],
+          Stack(
+            alignment: AlignmentGeometry.bottomRight,
+            children: [
+              RepaintBoundary(
+                key: _shareCardKey,
+                child: GlassCard(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.military_tech_rounded,
+                              color: PSColors.secondary, size: 40),
+                          const SizedBox(height: 12),
+                          Text('#${rankData['rank']}',
+                              textScaler: MediaQuery.textScalerOf(context),
+                              style: const TextStyle(
+                                  fontFamily: _fontHeading,
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w800,
+                                  color: PSColors.secondary)),
+                        ],
+                      ),
+                      Text('Your Rank',
+                          textScaler: MediaQuery.textScalerOf(context),
+                          style: const TextStyle(
+                              fontFamily: _fontBody,
+                              fontSize: 14,
+                              color: PSColors.textSecondary)),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _RankStat(
+                              label: 'Total Marks',
+                              value: (rankData['totalMarks'] as num?)
+                                      ?.toStringAsFixed(1) ??
+                                  '0',
+                              color: PSColors.success),
+                          _RankStat(
+                              label: 'Correct',
+                              value: '${rankData['totalCorrect'] ?? 0}',
+                              color: PSColors.primary),
+                          _RankStat(
+                              label: 'Percentile',
+                              value: '${rankData['percentile'] ?? 0}%',
+                              color: PSColors.cyan),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text('out of $totalParticipants participants',
+                          textScaler: MediaQuery.textScalerOf(context),
+                          style: const TextStyle(
+                              fontFamily: _fontBody,
+                              fontSize: 12,
+                              color: PSColors.textTertiary)),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Text('out of $totalParticipants participants',
-                    style: const TextStyle(
-                        fontFamily: _fontBody,
-                        fontSize: 12,
-                        color: PSColors.textTertiary)),
-              ],
-            ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: GestureDetector(
+                  onTap: () => _shareRankCard(rankData),
+                  child: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color:
+                              AppColors.textSecondary.withValues(alpha: 0.3)),
+                    ),
+                    child: const Icon(Icons.share,
+                        size: 18, color: AppColors.textPrimary),
+                  ),
+                ),
+              ),
+            ],
           ),
         ] else ...[
           const _PSEmptyState(
@@ -1711,13 +1641,16 @@ class _RankTabInlineState extends State<_RankTabInline> {
                   border: Border.all(
                       color: isYou
                           ? PSColors.primary.withValues(alpha: 0.4)
-                          : Colors.white.withValues(alpha: 0.06)),
+                          : (rankNum != 1 && rankNum != 2 && rankNum != 3)
+                              ? Colors.white.withValues(alpha: 0.06)
+                              : rankColor.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   children: [
                     SizedBox(
                       width: 36,
                       child: Text('#$rankNum',
+                          textScaler: MediaQuery.textScalerOf(context),
                           style: TextStyle(
                               fontFamily: _fontHeading,
                               fontSize: 16,
@@ -1726,6 +1659,7 @@ class _RankTabInlineState extends State<_RankTabInline> {
                     ),
                     Expanded(
                       child: Text(displayLabel,
+                          textScaler: MediaQuery.textScalerOf(context),
                           style: TextStyle(
                               fontFamily: _fontBody,
                               fontSize: 14,
@@ -1736,6 +1670,7 @@ class _RankTabInlineState extends State<_RankTabInline> {
                           overflow: TextOverflow.ellipsis),
                     ),
                     Text('$marks pts',
+                        textScaler: MediaQuery.textScalerOf(context),
                         style: const TextStyle(
                             fontFamily: _fontHeading,
                             fontSize: 14,
@@ -1766,6 +1701,7 @@ class _RankStat extends StatelessWidget {
     return Column(
       children: [
         Text(value,
+            textScaler: MediaQuery.textScalerOf(context),
             style: TextStyle(
                 fontFamily: _fontHeading,
                 fontSize: 20,
@@ -1773,11 +1709,409 @@ class _RankStat extends StatelessWidget {
                 color: color)),
         const SizedBox(height: 2),
         Text(label,
+            textScaler: MediaQuery.textScalerOf(context),
             style: const TextStyle(
                 fontFamily: _fontBody,
                 fontSize: 11,
                 color: PSColors.textSecondary)),
       ],
     );
+  }
+}
+
+class SettingsBottomSheet extends StatefulWidget {
+  final Widget sectiontitle;
+  final Widget signoutbutton;
+
+  const SettingsBottomSheet({
+    super.key,
+    required this.sectiontitle,
+    required this.signoutbutton,
+  });
+
+  @override
+  State<SettingsBottomSheet> createState() => _SettingsBottomSheetState();
+}
+
+class _SettingsBottomSheetState extends State<SettingsBottomSheet> {
+  final _userIdController = TextEditingController();
+  bool _loadingSettingsProfile = false;
+  String? _selectedExam;
+  AppLanguage? _selectedLanguage;
+  bool _savingSettings = false;
+  bool _soundEnabled = true;
+  static const String _soundPrefKey = 'sound_enabled';
+  String? _settingsError;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadSettingsProfile();
+      _loadSoundPreference();
+      setState(() {
+        _selectedLanguage =
+            Provider.of<QuizProvider>(context, listen: false).language;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _userIdController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadSettingsProfile() async {
+    final auth = context.read<AuthProvider>();
+    if (!auth.isAuthenticated) return;
+    setState(() => _loadingSettingsProfile = true);
+    try {
+      final data = await ApiService().getUserProfile();
+      final profile = data['profile'] as Map<String, dynamic>? ?? {};
+      if (mounted) {
+        setState(() {
+          _userIdController.text = profile['userID']?.toString() ?? '';
+          _selectedExam = profile['examType']?.toString();
+          _loadingSettingsProfile = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingSettingsProfile = false);
+    }
+  }
+
+  Future<void> _loadSoundPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _soundEnabled = prefs.getBool(_soundPrefKey) ?? true;
+      });
+    }
+  }
+
+  Future<void> _saveSettings() async {
+    final userId = _userIdController.text.trim();
+    final quizProvider = Provider.of<QuizProvider>(context, listen: false);
+    if (userId.isEmpty) {
+      setState(() => _settingsError = 'Please enter a User ID');
+      return;
+    }
+    if (_selectedExam == null) {
+      setState(() => _settingsError = 'Please select an exam type');
+      return;
+    }
+    if (_selectedLanguage == null) {
+      setState(() => _settingsError = 'Please select a language');
+      return;
+    }
+    setState(() {
+      _savingSettings = true;
+      _settingsError = null;
+    });
+    try {
+      if (_selectedLanguage != quizProvider.language) {
+        await quizProvider.setLanguage(_selectedLanguage!);
+      }
+      await ApiService().updateUserProfile({
+        'userID': userId.toLowerCase(),
+        'examType': _selectedExam,
+      });
+      await context.read<AuthProvider>().refreshProfile();
+      if (mounted) {
+        final settings = Provider.of<TimelineSettingsProvider>(context, listen: false);
+        final feeds = await FeedRepository().loadFeed();
+        
+        await quizProvider.loadInitial(
+          _selectedExam!,
+          mode: settings.mode,
+          feedCards: feeds,
+          spacing: settings.spacing,
+        );
+
+        setState(() => _savingSettings = false);
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Settings saved',
+                textScaler: MediaQuery.textScalerOf(context),
+                style: const TextStyle(fontFamily: 'Inter')),
+            backgroundColor: PSColors.success,
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _savingSettings = false;
+          _settingsError = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    }
+  }
+
+  Future<void> _toggleSound(bool value) async {
+    setState(() => _soundEnabled = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_soundPrefKey, value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.7,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) => SingleChildScrollView(
+        controller: scrollController,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 5, 20, 10),
+          child: Column(
+            children: [
+              const SizedBox(height: 20),
+              widget.sectiontitle,
+              const SizedBox(height: 15),
+              _buildSettingsSection(),
+              const SizedBox(height: 5),
+              widget.signoutbutton,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSettingsSection() {
+    final small = MediaQuery.of(context).size.width < 360;
+
+    return _loadingSettingsProfile
+        ? const _PSLoader(message: 'Loading settings…')
+        : GlassCard(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _PSSectionLabel('User ID'),
+                const SizedBox(height: 5),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 48),
+                  child: _FieldShell(
+                    child: TextField(
+                      controller: _userIdController,
+                      style: TextStyle(
+                          fontFamily: _fontBody,
+                          fontSize: small ? 10 : 12,
+                          fontWeight: FontWeight.w500,
+                          color: PSColors.textPrimary),
+                      decoration: const InputDecoration(
+                        hintText: 'e.g. aspirant2025',
+                        hintStyle: TextStyle(
+                            fontFamily: _fontBody,
+                            color: PSColors.textTertiary),
+                        prefixIcon: Icon(Icons.person_outline_rounded,
+                            color: PSColors.textSecondary, size: 20),
+                        border: InputBorder.none,
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'This will be your unique identity on the leaderboard.',
+                  textScaler: MediaQuery.textScalerOf(context),
+                  style: TextStyle(
+                      fontFamily: _fontBody,
+                      fontSize: small ? 10 : 12,
+                      color: PSColors.textSecondary),
+                ),
+                const SizedBox(height: 15),
+                const _PSSectionLabel('Target Exam'),
+                const SizedBox(height: 5),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 48),
+                  child: _FieldShell(
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _selectedExam,
+                        isExpanded: true,
+                        hint: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Text('Select your target exam',
+                              textScaler: MediaQuery.textScalerOf(context),
+                              style: const TextStyle(
+                                  fontFamily: _fontBody,
+                                  color: PSColors.textTertiary,
+                                  fontSize: 15)),
+                        ),
+                        icon: const Padding(
+                          padding: EdgeInsets.only(right: 12),
+                          child: Icon(Icons.keyboard_arrow_down_rounded,
+                              color: PSColors.textSecondary),
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        dropdownColor: PSColors.card,
+                        items: AppConstants.examTypes.map((exam) {
+                          return DropdownMenuItem(
+                            value: exam,
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text(exam,
+                                  textScaler: MediaQuery.textScalerOf(context),
+                                  style: TextStyle(
+                                      fontFamily: _fontBody,
+                                      fontSize: small ? 12 : 15,
+                                      fontWeight: FontWeight.w500,
+                                      color: PSColors.textPrimary)),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (v) => setState(() => _selectedExam = v),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 15),
+                const _PSSectionLabel('Language'),
+                const SizedBox(height: 5),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 48),
+                  child: _FieldShell(
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<AppLanguage>(
+                        value: _selectedLanguage,
+                        isExpanded: true,
+                        hint: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Text('Select Preffered Language',
+                              textScaler: MediaQuery.textScalerOf(context),
+                              style: const TextStyle(
+                                  fontFamily: _fontBody,
+                                  color: PSColors.textTertiary,
+                                  fontSize: 15)),
+                        ),
+                        icon: const Padding(
+                          padding: EdgeInsets.only(right: 12),
+                          child: Icon(Icons.keyboard_arrow_down_rounded,
+                              color: PSColors.textSecondary),
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        dropdownColor: PSColors.card,
+                        items: AppLanguage.values.map((language) {
+                          return DropdownMenuItem(
+                            value: language,
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text(language.name,
+                                  textScaler: MediaQuery.textScalerOf(context),
+                                  style: TextStyle(
+                                      fontFamily: _fontBody,
+                                      fontSize: small ? 12 : 15,
+                                      fontWeight: FontWeight.w500,
+                                      color: PSColors.textPrimary)),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (v) => setState(() => _selectedLanguage = v),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 15),
+                const _PSSectionLabel('Sound Effects'),
+                const SizedBox(height: 5),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 45),
+                  child: _FieldShell(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _soundEnabled
+                                ? Icons.volume_up_rounded
+                                : Icons.volume_off_rounded,
+                            color: PSColors.textSecondary,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Answer sound effects',
+                              textScaler: MediaQuery.textScalerOf(context),
+                              style: TextStyle(
+                                  fontFamily: _fontBody,
+                                  fontSize: small ? 12 : 15,
+                                  fontWeight: FontWeight.w500,
+                                  color: PSColors.textPrimary),
+                            ),
+                          ),
+                          Switch(
+                            value: _soundEnabled,
+                            onChanged: _toggleSound,
+                            activeThumbColor: PSColors.primary,
+                            activeTrackColor:
+                                PSColors.primary.withValues(alpha: 0.3),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 15),
+                if (_settingsError != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: PSColors.error.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: PSColors.error.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline_rounded,
+                            color: PSColors.error, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(_settingsError!,
+                              textScaler: MediaQuery.textScalerOf(context),
+                              style: const TextStyle(
+                                  fontFamily: _fontBody,
+                                  color: PSColors.error,
+                                  fontSize: 13)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                SizedBox(
+                  width: double.infinity,
+                  child: _savingSettings
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(vertical: 10),
+                            child: CircularProgressIndicator(
+                                color: PSColors.primary, strokeWidth: 2.5),
+                          ),
+                        )
+                      : _PSButton(
+                          label: 'Save',
+                          icon: Icons.check_rounded,
+                          onTap: _saveSettings),
+                ),
+              ],
+            ),
+          );
   }
 }

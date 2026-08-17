@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -118,16 +120,24 @@ class _LoginPageState extends State<LoginPage>
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 32),
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         const Spacer(flex: 2), // Keeps content shifted upward
                         _buildBrand(),
                         const SizedBox(height: 16),
                         _buildTagline(),
-                        const Spacer(flex: 1),
+                        SizedBox(height: size.height / 10),
                         _buildGoogleButton(),
-                        const SizedBox(height: 20),
+                        const Spacer(flex: 1),
+                        // _buildGoogleButton(),
+                        // _buildGoogleButton(),
+                        // SizedBox(
+                        //   height: bottomSafePadding > 0
+                        //       ? bottomSafePadding + 5
+                        //       : 15,
+                        // ),
+                        //SizedBox(height: size.height / 10),
                       ],
                     ),
                   ),
@@ -206,53 +216,61 @@ class _LoginPageState extends State<LoginPage>
   Widget _buildGoogleButton() {
     return GestureDetector(
       onTap: _handleSignIn,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.30),
-              blurRadius: 24,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: _loading
-            ? const Center(
-                child: SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: AppColors.accent,
-                  ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            decoration: BoxDecoration(
+              //color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border:
+                  Border.all(color: AppColors.accent.withValues(alpha: 0.8)),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.accent.withValues(alpha: 0.2),
+                  blurRadius: 24,
+                  offset: const Offset(0, 0),
                 ),
-              )
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Real Google logo from assets
-                  Image.asset(
-                    'assets/image/googlelogo.png',
-                    width: 28,
-                    height: 28,
-                  ),
-                  const SizedBox(width: 12),
-                  const Text(
-                    'Continue with Google',
-                    style: TextStyle(
-                      fontFamily: 'SpaceGrotesk',
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF1A1A1A),
+              ],
+            ),
+            child: _loading
+                ? const Center(
+                    child: SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: AppColors.accent,
+                      ),
                     ),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Real Google logo from assets
+                      Image.asset(
+                        'assets/image/googlelogo.png',
+                        width: 28,
+                        height: 28,
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Continue with Google',
+                        style: TextStyle(
+                            fontFamily: 'SpaceGrotesk',
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary //Color(0xFF1A1A1A),
+                            ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+          ),
+        ),
       ),
     );
   }

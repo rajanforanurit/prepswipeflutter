@@ -27,11 +27,16 @@ dependencies:
   url_launcher: ^6.3.1
   audioplayers: ^6.0.0
   razorpay_flutter: ^1.4.5
+  lottie: ^3.3.3
+  path_provider: ^2.1.5
+  google_mobile_ads: ^7.0.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.0
 
 flutter:
   uses-material-design: true
@@ -39,3 +44,46 @@ flutter:
     - assets/image/prepswipehomescreen.png
     - assets/image/googlelogo.png
     - assets/music/correct_answer.mp3
+    - assets/music/wrong_answer.mp3
+    - assets/animatedicons/Streak Fire.json
+    - assets/animatedicons/Fireanimation.json
+    - assets/image/appicon_v1.2.png
+    - assets/image/appicon_foreground_v1.2.png
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/image/appicon_v1.2.png"
+
+  adaptive_icon_background: "#011136"
+  adaptive_icon_foreground: "assets/image/appicon_foreground_v1.2.png"
+
+  min_sdk_android: 21
+  remove_alpha_ios: true
+
+  web:
+    generate: true
+    image_path: "assets/image/appicon_v1.2.png"
+
+  windows:
+    generate: true
+    image_path: "assets/image/appicon_v1.2.png"
+  macos:
+    generate: true
+    image_path: "assets/image/appicon_v1.2.png"
+
+
+flutter_native_splash:
+  color: "#011136"
+  image: assets/image/appicon_v1.2.png
+  color_dark: "#011136"
+  image_dark: assets/image/appicon_v1.2.png
+  android: true
+  ios: true
+  android_12:
+    image: assets/image/appicon_foreground_v1.2.png
+    icon_background_color: "#011136"
+    image_dark: assets/image/appicon_foreground_v1.2.png
+    icon_background_color_dark: "#011136"
+  fullscreen: true
+  android_gravity: center       

@@ -1,5 +1,13 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_card_swiper/flutter_card_swiper.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:prepswipe/Timeline/feed_repository.dart';
+import 'package:prepswipe/models/timeline_models.dart';
+import 'package:prepswipe/providers/timeline_settings_provider.dart';
+import 'package:prepswipe/screens/feed_screen.dart';
+import 'package:prepswipe/utils/app_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
@@ -25,6 +33,26 @@ class QuizColors {
   static const gold = Color(0xFFFFD700);
 }
 
+class QuestionTextFormatter {
+  static final RegExp _numberedItemPattern =
+      RegExp(r'\s(\d{1,2}\.\s(?=[A-Z]))');
+
+  static String format(String text) {
+    if (text.isEmpty) return text;
+
+    final formatted = text.replaceAllMapped(
+      _numberedItemPattern,
+      (match) => '\n${match.group(1)}',
+    );
+
+    return formatted
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .join('\n');
+  }
+}
+
 class SoundSettings {
   static const String _soundPrefKey = 'sound_enabled';
 
@@ -37,7 +65,7 @@ class SoundSettings {
 class SwipeLimiter {
   static const _kCountKey = 'swipe_limiter_count';
   static const _kWindowStartKey = 'swipe_limiter_window_start';
-  static const int maxSwipes = 30;
+  static const int maxSwipes = 100;
   static const Duration window = Duration(hours: 3);
 
   static Future<int> getCount() async {
@@ -92,6 +120,29 @@ class SwipeLimiter {
   }
 }
 
+class RewardLimiter {
+  static const _kRewardSwipesKey = 'reward_limiter_swipes';
+  static const int maxSwipesBeforeAd = 15;
+
+  static Future<int> getSwipes() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_kRewardSwipesKey) ?? 0;
+  }
+
+  static Future<int> increment() async {
+    final prefs = await SharedPreferences.getInstance();
+    final current = prefs.getInt(_kRewardSwipesKey) ?? 0;
+    final updated = current + 1;
+    await prefs.setInt(_kRewardSwipesKey, updated);
+    return updated;
+  }
+
+  static Future<void> reset() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kRewardSwipesKey);
+  }
+}
+
 class QuizScreen extends StatefulWidget {
   const QuizScreen({super.key});
 
@@ -100,23 +151,68 @@ class QuizScreen extends StatefulWidget {
 }
 
 class _QuizScreenState extends State<QuizScreen> {
-  final PageController _pageController = PageController();
+  final CardSwiperController _swiperController = CardSwiperController();
 
   int _swipeCount = 0;
   bool _limitReached = false;
   Duration? _timeRemaining;
   int _currentIndex = 0;
+  final Map<int, bool> _flipped = {};
+
+  List<FeedCard> _feedCards = [];
+  String? _previousSessionId;
+
+  int _rewardSwipes = 0;
+  bool _rewardLimitReached = false;
+  int _maxIndexReached = 0;
+
+  RewardedAd? _rewardedAd;
+  bool _isRewardedAdLoading = false;
+
+  bool _isFlipped(int i) => _flipped[i] ?? false;
+
+  void _toggleFlip(int i) =>
+      setState(() => _flipped[i] = !(_flipped[i] ?? false));
+
+  int _getQuestionIndex(int timelineIndex, List<TimelineItem> timeline) {
+    final count = timeline
+        .take(timelineIndex + 1)
+        .where((item) => item.type == TimelineItemType.question)
+        .length;
+    return count > 0 ? count - 1 : 0;
+  }
 
   @override
   void initState() {
     super.initState();
+    _loadFeeds();
+    _loadRewardedAd();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _ensureLoaded();
       _loadSwipeState();
+      _loadRewardLimitState();
       context
           .read<AuthProvider>()
           .setPremiumActivatedListener(_onPremiumUnlocked);
     });
+  }
+
+  @override
+  void dispose() {
+    _swiperController.dispose();
+    _rewardedAd?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadFeeds() async {
+    try {
+      final feeds = await FeedRepository().loadFeed();
+      if (mounted) {
+        setState(() {
+          _feedCards = feeds;
+        });
+      }
+    } catch (_) {}
   }
 
   void _onPremiumUnlocked() async {
@@ -156,18 +252,53 @@ class _QuizScreenState extends State<QuizScreen> {
   Future<void> _ensureLoaded() async {
     if (!mounted) return;
     final quiz = context.read<QuizProvider>();
-    if (quiz.state == QuizState.idle || quiz.questions.isEmpty) {
+    if (quiz.state == QuizState.idle || quiz.visibleQuestions.isEmpty) {
       final auth = context.read<AuthProvider>();
       final exam = auth.userProfile?.examType ?? 'UPSC';
-      await quiz.loadQuestions(exam);
+      final settings = context.read<TimelineSettingsProvider>();
+
+      await quiz.loadInitial(
+        exam,
+        mode: settings.mode,
+        feedCards: _feedCards,
+        spacing: settings.spacing,
+        isPremium: auth.isPremium,
+      );
     }
   }
 
-  void _onPageChanged(int index) {
+  Future<void> _loadRewardLimitState() async {
+    final auth = context.read<AuthProvider>();
+    if (auth.isPremium) {
+      if (!mounted) return;
+      setState(() {
+        _rewardSwipes = 0;
+        _rewardLimitReached = false;
+      });
+      return;
+    }
+    final swipes = await RewardLimiter.getSwipes();
+    if (!mounted) return;
+    setState(() {
+      _rewardSwipes = swipes;
+      _rewardLimitReached = swipes >= RewardLimiter.maxSwipesBeforeAd;
+    });
+  }
+
+  void _onPageChanged(
+      int index, QuizProvider quiz, TimelineSettingsProvider settings) {
     setState(() => _currentIndex = index);
-    context.read<QuizProvider>().navigateToQuestion(index);
 
     final auth = context.read<AuthProvider>();
+    final qIndex = _getQuestionIndex(index, quiz.timeline);
+    quiz.navigateToQuestion(
+      qIndex,
+      mode: settings.mode,
+      feedCards: _feedCards,
+      spacing: settings.spacing,
+      isPremium: auth.isPremium,
+    );
+
     if (auth.isPremium) return;
 
     SwipeLimiter.increment().then((updated) {
@@ -183,6 +314,94 @@ class _QuizScreenState extends State<QuizScreen> {
         });
       }
     });
+
+    if (index > _maxIndexReached) {
+      _maxIndexReached = index;
+      RewardLimiter.increment().then((updated) {
+        if (!mounted) return;
+        setState(() {
+          _rewardSwipes = updated;
+          _rewardLimitReached = updated >= RewardLimiter.maxSwipesBeforeAd;
+        });
+      });
+    }
+  }
+
+  void _loadRewardedAd() {
+    if (_isRewardedAdLoading || _rewardedAd != null) return;
+    _isRewardedAdLoading = true;
+
+    final adUnitId = defaultTargetPlatform == TargetPlatform.iOS
+        ? 'ca-app-pub-3940256099942544/1712485313'
+        : 'ca-app-pub-3940256099942544/5224354917';
+
+    RewardedAd.load(
+      adUnitId: adUnitId,
+      request: const AdRequest(),
+      rewardedAdLoadCallback: RewardedAdLoadCallback(
+        onAdLoaded: (ad) {
+          setState(() {
+            _rewardedAd = ad;
+            _isRewardedAdLoading = false;
+          });
+          ad.fullScreenContentCallback = FullScreenContentCallback(
+            onAdDismissedFullScreenContent: (ad) {
+              ad.dispose();
+              _rewardedAd = null;
+              _loadRewardedAd();
+            },
+            onAdFailedToShowFullScreenContent: (ad, error) {
+              ad.dispose();
+              _rewardedAd = null;
+              _loadRewardedAd();
+            },
+          );
+        },
+        onAdFailedToLoad: (error) {
+          setState(() {
+            _isRewardedAdLoading = false;
+          });
+          print('RewardedAd failed to load: $error');
+        },
+      ),
+    );
+  }
+
+  void _showRewardedAd() {
+    if (_rewardedAd == null) {
+      _loadRewardedAd();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Loading video, please try again in a moment...'),
+        ),
+      );
+      return;
+    }
+
+    _rewardedAd!.show(
+      onUserEarnedReward: (ad, reward) {
+        Future.wait([
+          SwipeLimiter.reset(),
+          RewardLimiter.reset(),
+        ]).then((_) {
+          if (!mounted) return;
+          setState(() {
+            _swipeCount = 0;
+            _limitReached = false;
+            _timeRemaining = null;
+            _rewardSwipes = 0;
+            _rewardLimitReached = false;
+            _maxIndexReached = _currentIndex;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('🎉 15 more questions unlocked!'),
+              backgroundColor: QuizColors.success,
+            ),
+          );
+        });
+      },
+    );
   }
 
   void _goToNext() {
@@ -191,10 +410,7 @@ class _QuizScreenState extends State<QuizScreen> {
       _showLimitSheet();
       return;
     }
-    _pageController.nextPage(
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeOutCubic,
-    );
+    _swiperController.swipe(CardSwiperDirection.left);
   }
 
   void _showLimitSheet() {
@@ -210,64 +426,856 @@ class _QuizScreenState extends State<QuizScreen> {
     );
   }
 
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
+  Future<void> _showTimelineSettings() async {
+    final settings = context.read<TimelineSettingsProvider>();
+    final quiz = context.read<QuizProvider>();
+
+    TimelineMode selectedMode = settings.mode;
+    int selectedSpacing = settings.spacing;
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SafeArea(
+              child: Container(
+                margin: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: QuizColors.card,
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: .08),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      "Timeline Settings",
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "Content",
+                        style: TextStyle(
+                          fontFamily: 'SpaceGrotesk',
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        ChoiceChip(
+                          label: const Text("Quiz + Feed"),
+                          selected: selectedMode == TimelineMode.mixed,
+                          showCheckmark: false,
+                          selectedColor: AppColors.accent,
+                          labelStyle: TextStyle(
+                              fontFamily: 'SpaceGrotesk',
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.5,
+                              color: selectedMode == TimelineMode.mixed
+                                  ? AppColors.textPrimary
+                                  : AppColors.textSecondary),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          onSelected: (_) {
+                            setModalState(() {
+                              selectedMode = TimelineMode.mixed;
+                            });
+                          },
+                        ),
+                        ChoiceChip(
+                          label: const Text("Quiz Only"),
+                          selected: selectedMode == TimelineMode.quizOnly,
+                          selectedColor: AppColors.accent,
+                          labelStyle: TextStyle(
+                              fontFamily: 'SpaceGrotesk',
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.5,
+                              color: selectedMode == TimelineMode.quizOnly
+                                  ? AppColors.textPrimary
+                                  : AppColors.textSecondary),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          showCheckmark: false,
+                          onSelected: (_) {
+                            setModalState(() {
+                              selectedMode = TimelineMode.quizOnly;
+                            });
+                          },
+                        ),
+                        ChoiceChip(
+                          label: const Text("Feed Only"),
+                          selected: selectedMode == TimelineMode.feedOnly,
+                          selectedColor: AppColors.accent,
+                          labelStyle: TextStyle(
+                              fontFamily: 'SpaceGrotesk',
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.5,
+                              color: selectedMode == TimelineMode.feedOnly
+                                  ? AppColors.textPrimary
+                                  : AppColors.textSecondary),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          showCheckmark: false,
+                          onSelected: (_) {
+                            setModalState(() {
+                              selectedMode = TimelineMode.feedOnly;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 28),
+                    AnimatedOpacity(
+                      duration: const Duration(milliseconds: 200),
+                      opacity: selectedMode == TimelineMode.mixed ? 1 : .35,
+                      child: IgnorePointer(
+                        ignoring: selectedMode != TimelineMode.mixed,
+                        child: Column(
+                          children: [
+                            const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                "Feed every",
+                                style: TextStyle(
+                                  fontFamily: 'SpaceGrotesk',
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textPrimary,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 10,
+                              children: [4, 5, 10, 15, 20]
+                                  .map(
+                                    (e) => ChoiceChip(
+                                      label: Text("$e Questions"),
+                                      selected: selectedSpacing == e,
+                                      selectedColor: AppColors.accent,
+                                      labelStyle: TextStyle(
+                                          fontFamily: 'SpaceGrotesk',
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 0.5,
+                                          color: selectedSpacing == e
+                                              ? AppColors.textPrimary
+                                              : AppColors.textSecondary),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(18),
+                                      ),
+                                      showCheckmark: false,
+                                      onSelected: (_) {
+                                        setModalState(() {
+                                          selectedSpacing = e;
+                                        });
+                                      },
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: PSButton(
+                            onTap: () {
+                              Navigator.pop(context);
+                            },
+                            label: "Cancel",
+                            outlined: true,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: PSButton(
+                            onTap: () async {
+                              await settings.setMode(selectedMode);
+                              await settings.setSpacing(selectedSpacing);
+
+                              if (!mounted) return;
+                              Navigator.pop(context);
+
+                              quiz.rebuildTimeline(
+                                mode: selectedMode,
+                                feedCards: _feedCards,
+                                spacing: selectedSpacing,
+                              );
+                            },
+                            label: "Apply",
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildDropdownFilters(
+      QuizProvider quiz, TimelineSettingsProvider settings) {
+    final years = quiz.availableYears;
+    final subjects = quiz.availableSubjects;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      child: Row(
+        children: [
+          PopupMenuButton<int?>(
+            offset: const Offset(0, 45),
+            color: QuizColors.card,
+            elevation: 8,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            onSelected: (value) {
+              if (value == null) {
+                quiz.applyFilters(
+                  years: {},
+                  subjects: quiz.selectedSubjects,
+                  mode: settings.mode,
+                  feedCards: _feedCards,
+                  spacing: settings.spacing,
+                );
+              } else {
+                final nextYears = Set<int>.from(quiz.selectedYears);
+                if (nextYears.contains(value)) {
+                  nextYears.remove(value);
+                } else {
+                  nextYears.add(value);
+                }
+                quiz.applyFilters(
+                  years: nextYears,
+                  subjects: quiz.selectedSubjects,
+                  mode: settings.mode,
+                  feedCards: _feedCards,
+                  spacing: settings.spacing,
+                );
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<int?>(
+                value: null,
+                child: Row(
+                  children: [
+                    Icon(
+                      quiz.selectedYears.isEmpty
+                          ? Icons.check_box_rounded
+                          : Icons.check_box_outline_blank_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('All Years',
+                        style: TextStyle(color: Colors.white)),
+                  ],
+                ),
+              ),
+              ...years.map((y) {
+                final isSelected = quiz.selectedYears.contains(y);
+                return PopupMenuItem<int?>(
+                  value: y,
+                  child: Row(
+                    children: [
+                      Icon(
+                        isSelected
+                            ? Icons.check_box_rounded
+                            : Icons.check_box_outline_blank_rounded,
+                        color:
+                            isSelected ? const Color(0xFF38BDF8) : Colors.white,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(y.toString(),
+                          style: const TextStyle(color: Colors.white)),
+                    ],
+                  ),
+                );
+              }),
+            ],
+            child: _buildFilterChipButton(
+              icon: Icons.calendar_today_outlined,
+              label: quiz.selectedYears.isEmpty
+                  ? 'Year'
+                  : quiz.selectedYears.length == 1
+                      ? quiz.selectedYears.first.toString()
+                      : '${quiz.selectedYears.length} Years',
+            ),
+          ),
+          const SizedBox(width: 8),
+          PopupMenuButton<String?>(
+            offset: const Offset(0, 45),
+            color: QuizColors.card,
+            elevation: 8,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            onSelected: (value) {
+              if (value == null) {
+                quiz.applyFilters(
+                  years: quiz.selectedYears,
+                  subjects: {},
+                  mode: settings.mode,
+                  feedCards: _feedCards,
+                  spacing: settings.spacing,
+                );
+              } else {
+                final nextSubjects = Set<String>.from(quiz.selectedSubjects);
+                if (nextSubjects.contains(value)) {
+                  nextSubjects.remove(value);
+                } else {
+                  nextSubjects.add(value);
+                }
+                quiz.applyFilters(
+                  years: quiz.selectedYears,
+                  subjects: nextSubjects,
+                  mode: settings.mode,
+                  feedCards: _feedCards,
+                  spacing: settings.spacing,
+                );
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String?>(
+                value: null,
+                child: Row(
+                  children: [
+                    Icon(
+                      quiz.selectedSubjects.isEmpty
+                          ? Icons.check_box_rounded
+                          : Icons.check_box_outline_blank_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('All Subjects',
+                        style: TextStyle(color: Colors.white)),
+                  ],
+                ),
+              ),
+              ...subjects.map((s) {
+                final isSelected = quiz.selectedSubjects.contains(s);
+                return PopupMenuItem<String?>(
+                  value: s,
+                  child: Row(
+                    children: [
+                      Icon(
+                        isSelected
+                            ? Icons.check_box_rounded
+                            : Icons.check_box_outline_blank_rounded,
+                        color:
+                            isSelected ? const Color(0xFF38BDF8) : Colors.white,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(s, style: const TextStyle(color: Colors.white)),
+                    ],
+                  ),
+                );
+              }),
+            ],
+            child: _buildFilterChipButton(
+              icon: Icons.book_outlined,
+              label: quiz.selectedSubjects.isEmpty
+                  ? 'Subject'
+                  : quiz.selectedSubjects.length == 1
+                      ? quiz.selectedSubjects.first
+                      : '${quiz.selectedSubjects.length} Subjects',
+            ),
+          ),
+          const SizedBox(width: 8),
+          _buildFilterChipButton(
+            icon: Icons.school_outlined,
+            label: quiz.currentExam ?? 'Exam',
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChipButton(
+      {required IconData icon, required String label}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141927),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: const Color(0xFF38BDF8), size: 15),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Icon(
+            Icons.arrow_drop_down,
+            color: Colors.white.withValues(alpha: 0.6),
+            size: 18,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActiveFilters(
+      QuizProvider quiz, TimelineSettingsProvider settings) {
+    final hasFilters =
+        quiz.selectedYears.isNotEmpty || quiz.selectedSubjects.isNotEmpty;
+    if (!hasFilters) return const SizedBox.shrink();
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+      child: Row(
+        children: [
+          ...quiz.selectedYears.map((y) => Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: _buildActiveChip(
+                  label: 'Year: $y',
+                  onClear: () {
+                    final nextYears = Set<int>.from(quiz.selectedYears)
+                      ..remove(y);
+                    quiz.applyFilters(
+                      years: nextYears,
+                      subjects: quiz.selectedSubjects,
+                      mode: settings.mode,
+                      feedCards: _feedCards,
+                      spacing: settings.spacing,
+                    );
+                  },
+                ),
+              )),
+          ...quiz.selectedSubjects.map((s) => Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: _buildActiveChip(
+                  label: 'Subject: $s',
+                  onClear: () {
+                    final nextSubjects = Set<String>.from(quiz.selectedSubjects)
+                      ..remove(s);
+                    quiz.applyFilters(
+                      years: quiz.selectedYears,
+                      subjects: nextSubjects,
+                      mode: settings.mode,
+                      feedCards: _feedCards,
+                      spacing: settings.spacing,
+                    );
+                  },
+                ),
+              )),
+          GestureDetector(
+            onTap: () {
+              quiz.clearFilters(
+                mode: settings.mode,
+                feedCards: _feedCards,
+                spacing: settings.spacing,
+              );
+            },
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4.0),
+              child: Text(
+                'Clear all',
+                style: TextStyle(
+                  color: Color(0xFF38BDF8),
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActiveChip(
+      {required String label, required VoidCallback onClear}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141927).withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.7),
+              fontSize: 12,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: onClear,
+            child: Icon(
+              Icons.close_rounded,
+              color: Colors.white.withValues(alpha: 0.5),
+              size: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyFilterState(
+      QuizProvider quiz, TimelineSettingsProvider settings) {
+    final hasFilters =
+        quiz.selectedYears.isNotEmpty || quiz.selectedSubjects.isNotEmpty;
+    if (hasFilters) {
+      return SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildDropdownFilters(quiz, settings),
+            _buildActiveFilters(quiz, settings),
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.filter_list_off_rounded,
+                        color: QuizColors.textTertiary,
+                        size: 64,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'No questions match your filters',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Try relaxing some filters or clear all to show everything.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: QuizColors.textSecondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: 180,
+                        child: PSButton(
+                          label: 'Reset Filters',
+                          onTap: () {
+                            quiz.clearFilters(
+                              mode: settings.mode,
+                              feedCards: _feedCards,
+                              spacing: settings.spacing,
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return const PSLoader(message: "Preparing timeline...");
   }
 
   @override
   Widget build(BuildContext context) {
     final quiz = context.watch<QuizProvider>();
     final auth = context.watch<AuthProvider>();
-    final blocked = _limitReached && !auth.isPremium;
+    final settings = context.watch<TimelineSettingsProvider>();
+    final reachedQuota = _rewardLimitReached;
+    final blocked = reachedQuota || (_limitReached && !auth.isPremium);
+
+    final timeline = quiz.timeline;
+
+    if (_previousSessionId != quiz.sessionId) {
+      _previousSessionId = quiz.sessionId;
+      _currentIndex = 0;
+      _maxIndexReached = 0;
+    }
 
     return Scaffold(
       backgroundColor: QuizColors.background,
       body: switch (quiz.state) {
         QuizState.idle ||
-        QuizState.loading when quiz.questions.isEmpty =>
+        QuizState.loading when quiz.visibleQuestions.isEmpty =>
           const PSLoader(message: 'Loading questions…'),
-        QuizState.error when quiz.questions.isEmpty => _ErrorView(
+        QuizState.error when quiz.visibleQuestions.isEmpty => _ErrorView(
             message: quiz.error ?? 'Something went wrong',
             onRetry: () {
               final authP = context.read<AuthProvider>();
               final exam = authP.userProfile?.examType ?? 'UPSC';
-              quiz.loadQuestions(exam, refresh: true);
+
+              quiz.loadInitial(
+                exam,
+                mode: settings.mode,
+                feedCards: _feedCards,
+                spacing: settings.spacing,
+              );
             },
           ),
+        _ when timeline.isEmpty => _buildEmptyFilterState(quiz, settings),
         _ => SafeArea(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                _buildDropdownFilters(quiz, settings),
+                _buildActiveFilters(quiz, settings),
+                const SizedBox(height: 12),
                 Expanded(
                   child: Stack(
                     children: [
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                        child: PageView.builder(
-                          controller: _pageController,
-                          scrollDirection: Axis.horizontal,
-                          physics: blocked
-                              ? const NeverScrollableScrollPhysics()
-                              : const PageScrollPhysics(),
-                          itemCount: quiz.questions.length,
-                          onPageChanged: _onPageChanged,
-                          itemBuilder: (context, index) {
-                            return _QuestionCard(
-                              question: quiz.questions[index],
-                              questionIndex: index,
-                              onNavigateNext: _goToNext,
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                        child: CardSwiper(
+                          key: ValueKey(quiz.sessionId),
+                          controller: _swiperController,
+                          cardsCount: timeline.length,
+                          numberOfCardsDisplayed:
+                              timeline.length > 2 ? 3 : timeline.length,
+                          backCardOffset: const Offset(0, -12),
+                          padding: EdgeInsets.zero,
+                          isDisabled: blocked,
+                          threshold: 100,
+                          allowedSwipeDirection:
+                              const AllowedSwipeDirection.only(
+                            left: true,
+                            right: true,
+                          ),
+                          onSwipe: (previousIndex, currentIndex, direction) {
+                            final item = timeline[previousIndex];
+                            final isQuestion =
+                                item.type == TimelineItemType.question;
+                            final qIndex = isQuestion
+                                ? _getQuestionIndex(previousIndex, timeline)
+                                : -1;
+                            final isAnswered =
+                                qIndex != -1 && quiz.isSubmitted(qIndex);
+                            final isUnanswered = isQuestion && !isAnswered;
+
+                            if (isUnanswered) {
+                              if (direction != CardSwiperDirection.left &&
+                                  direction != CardSwiperDirection.right) {
+                                return false;
+                              }
+                            }
+
+                            if (currentIndex != null) {
+                              _onPageChanged(currentIndex, quiz, settings);
+                            }
+                            return true;
+                          },
+                          onUndo: (previousIndex, currentIndex, direction) {
+                            _onPageChanged(currentIndex, quiz, settings);
+                            return true;
+                          },
+                          cardBuilder: (context, index, percentX, percentY) {
+                            final item = timeline[index];
+                            final isQuestion =
+                                item.type == TimelineItemType.question;
+                            final qIndex = isQuestion
+                                ? _getQuestionIndex(index, timeline)
+                                : -1;
+                            final isAnswered =
+                                qIndex != -1 && quiz.isSubmitted(qIndex);
+                            final isUnansweredQuestion =
+                                isQuestion && !isAnswered;
+
+                            final cardWidget = () {
+                              switch (item.type) {
+                                case TimelineItemType.question:
+                                  return _QuestionCard(
+                                    question: item.data,
+                                    questionIndex: qIndex,
+                                    onNavigateNext: _goToNext,
+                                  );
+
+                                case TimelineItemType.feed:
+                                  final flipped = _isFlipped(index);
+                                  return GestureDetector(
+                                    onTap: () => _toggleFlip(index),
+                                    behavior: HitTestBehavior.opaque,
+                                    child: FlipCard(
+                                      flipped: flipped,
+                                      front: buildFront(
+                                          timeline[index].data as FeedCard,
+                                          index),
+                                      back: buildBack(
+                                          timeline[index].data as FeedCard,
+                                          index),
+                                    ),
+                                  );
+
+                                case TimelineItemType.ad:
+                                  return const _AdCard();
+                              }
+                            }();
+
+                            return Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                cardWidget,
+                                if (isUnansweredQuestion && percentX != 0) ...[
+                                  Positioned.fill(
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(24),
+                                      child: Container(
+                                        color: Colors.black.withValues(
+                                            alpha: ((percentX.abs())
+                                                        .clamp(0, 100) /
+                                                    100.0) *
+                                                0.75),
+                                      ),
+                                    ),
+                                  ),
+                                  Center(
+                                    child: Container(
+                                      width: 80,
+                                      height: 80,
+                                      decoration: BoxDecoration(
+                                        color: Colors.black45,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                            color: Colors.white
+                                                .withValues(alpha: 0.1),
+                                            width: 1.5),
+                                      ),
+                                      child: Stack(
+                                        alignment: Alignment.center,
+                                        children: [
+                                          SizedBox(
+                                            width: 60,
+                                            height: 60,
+                                            child: CircularProgressIndicator(
+                                              value: ((percentX.abs())
+                                                      .clamp(0, 100) /
+                                                  100.0),
+                                              strokeWidth: 4,
+                                              valueColor:
+                                                  const AlwaysStoppedAnimation<
+                                                      Color>(AppColors.primary),
+                                              backgroundColor: Colors.white24,
+                                            ),
+                                          ),
+                                          const Icon(
+                                            Icons.skip_next_rounded,
+                                            color: Colors.white,
+                                            size: 32,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             );
                           },
                         ),
                       ),
-                      if (blocked) _LimitOverlay(onTap: _showLimitSheet),
+                      if (blocked)
+                        _LimitOverlay(
+                          title: _rewardLimitReached
+                              ? 'Unlock More Questions'
+                              : 'Daily Limit Reached',
+                          subtitle: _rewardLimitReached
+                              ? 'Watch a quick video to unlock 15 more questions'
+                              : 'Tap to unlock or upgrade to Premium',
+                          icon: _rewardLimitReached
+                              ? Icons.play_circle_outline_rounded
+                              : Icons.lock_rounded,
+                          onTap: _rewardLimitReached
+                              ? _showRewardedAd
+                              : _showLimitSheet,
+                        ),
                       if (!blocked)
                         Positioned(
                           right: 16,
                           bottom: 20,
-                          child: _NextButton(onTap: _goToNext),
+                          child: _FloatingButton(
+                              onTap: _goToNext,
+                              icon: Icons.keyboard_arrow_right_rounded),
                         ),
+                      if (!blocked && _currentIndex > 0)
+                        Positioned(
+                          right: 16,
+                          bottom: 70,
+                          child: _FloatingButton(
+                              onTap: () {
+                                _swiperController.undo();
+                              },
+                              icon: Icons.keyboard_arrow_left_rounded),
+                        ),
+                      Positioned(
+                        right: 16,
+                        bottom: (!blocked && _currentIndex > 0) ? 120 : 70,
+                        child: _FloatingButton(
+                            onTap: _showTimelineSettings, icon: Icons.settings),
+                      ),
                     ],
                   ),
                 ),
@@ -279,9 +1287,10 @@ class _QuizScreenState extends State<QuizScreen> {
   }
 }
 
-class _NextButton extends StatelessWidget {
+class _FloatingButton extends StatelessWidget {
   final VoidCallback onTap;
-  const _NextButton({required this.onTap});
+  final IconData icon;
+  const _FloatingButton({required this.onTap, required this.icon});
 
   @override
   Widget build(BuildContext context) {
@@ -305,8 +1314,8 @@ class _NextButton extends StatelessWidget {
             ),
           ],
         ),
-        child: const Icon(
-          Icons.keyboard_arrow_right_rounded,
+        child: Icon(
+          icon,
           color: QuizColors.textSecondary,
           size: 24,
         ),
@@ -331,13 +1340,16 @@ class _QuestionCard extends StatefulWidget {
 }
 
 class _QuestionCardState extends State<_QuestionCard>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   bool _isSaved = false;
   bool _isSaving = false;
   bool _explanationOpen = false;
   late AnimationController _panelController;
   late Animation<Offset> _panelSlide;
   late final AudioPlayer _audioPlayer;
+  late AnimationController _feedbackController;
+  late Animation<double> _shakeAnimation;
+  late Animation<double> _scaleAnimation;
 
   @override
   void initState() {
@@ -354,12 +1366,37 @@ class _QuestionCardState extends State<_QuestionCard>
       parent: _panelController,
       curve: Curves.easeOutCubic,
     ));
+    _feedbackController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _shakeAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: -8.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: -8.0, end: 8.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: 8.0, end: -8.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: -8.0, end: 8.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: 8.0, end: -4.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: -4.0, end: 4.0), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: 4.0, end: 0.0), weight: 1),
+    ]).animate(CurvedAnimation(
+      parent: _feedbackController,
+      curve: const Interval(0.0, 0.8, curve: Curves.easeInOut),
+    ));
+    _scaleAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.05), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: 1.05, end: 0.98), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: 0.98, end: 1.0), weight: 1),
+    ]).animate(CurvedAnimation(
+      parent: _feedbackController,
+      curve: Curves.easeInOut,
+    ));
     _checkBookmarkStatus();
   }
 
   @override
   void dispose() {
     _panelController.dispose();
+    _feedbackController.dispose();
     _audioPlayer.dispose();
     super.dispose();
   }
@@ -444,19 +1481,36 @@ class _QuestionCardState extends State<_QuestionCard>
   Future<void> _onShare(AppLanguage lang) async {
     final q = widget.question;
     final correctOpt = q.optionsFor(lang)[q.correctAnswer.toString()] ?? '';
+    final formattedQuestion =
+        QuestionTextFormatter.format(q.questionText(lang));
     final shareText =
-        '🎯 PrepSwipe Quiz\n\n📘 ${q.exam} ${q.year} | ${q.subject}${q.topic != null ? ' › ${q.topic}' : ''}\n\n❓ ${q.questionText(lang)}\n\n${q.optionList(lang).map((o) => '${o.key}. ${o.value}').join('\n')}\n\n✅ Answer: ${q.correctAnswer}. $correctOpt\n\nPractice more PYQs on PrepSwipe 👇\nhttps://play.google.com/store/apps/details?id=com.anuritinnovation.prepswipe';
+        '🎯 PrepSwipe Quiz\n\n📘 ${q.exam} ${q.year} | ${q.subject}${q.topic != null ? ' › ${q.topic}' : ''}\n\n❓ $formattedQuestion\n\n${q.optionList(lang).map((o) => '${o.key}. ${o.value}').join('\n')}\n\n✅ Answer: ${q.correctAnswer}. $correctOpt\n\nPractice more PYQs on PrepSwipe 👇\nhttps://play.google.com/store/apps/details?id=com.anuritinnovation.prepswipe';
     await Share.share(shareText,
         subject: 'PrepSwipe – ${q.exam} ${q.year} Question');
   }
 
   Future<void> _playCorrectSound() async {
     try {
+      print("playing correct");
       final enabled = await SoundSettings.isEnabled();
       if (!enabled || !mounted) return;
       await _audioPlayer.stop();
       await _audioPlayer.play(AssetSource('music/correct_answer.mp3'));
-    } catch (_) {}
+    } catch (e) {
+      print("Error playing correct sound: $e");
+    }
+  }
+
+  Future<void> _playInCorrectSound() async {
+    try {
+      print("playing incorrect");
+      final enabled = await SoundSettings.isEnabled();
+      if (!enabled || !mounted) return;
+      await _audioPlayer.stop();
+      await _audioPlayer.play(AssetSource('music/wrong_answer.mp3'));
+    } catch (e) {
+      print("Error playing incorrect sound: $e");
+    }
   }
 
   Future<void> _submit(BuildContext context, int index) async {
@@ -465,8 +1519,11 @@ class _QuestionCardState extends State<_QuestionCard>
     if (!mounted) return;
     context.read<AnalyticsProvider>().invalidate();
     final selected = quizProvider.selectedOptionFor(index);
+    _feedbackController.forward(from: 0.0);
     if (selected == widget.question.correctAnswer) {
-      _playCorrectSound();
+      await _playCorrectSound();
+    } else {
+      await _playInCorrectSound();
     }
   }
 
@@ -477,116 +1534,149 @@ class _QuestionCardState extends State<_QuestionCard>
     final selected = quiz.selectedOptionFor(widget.questionIndex);
     final submitted = quiz.isSubmitted(widget.questionIndex);
     final explanation = widget.question.explanation(lang);
+    final isCorrect = selected == widget.question.correctAnswer;
 
-    return LayoutBuilder(
-      builder: (context, outerConstraints) {
-        return SizedBox(
-          height: outerConstraints.maxHeight,
-          width: outerConstraints.maxWidth,
-          child: Stack(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(24),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                  child: Container(
-                    height: outerConstraints.maxHeight,
-                    decoration: BoxDecoration(
-                      color: QuizColors.card.withValues(alpha: 0.72),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.06),
-                        width: 1,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: QuizColors.primary.withValues(alpha: 0.12),
-                          blurRadius: 28,
-                          spreadRadius: -8,
-                          offset: const Offset(0, 12),
-                        ),
-                      ],
-                    ),
-                    child: _ScrollableCardContent(
-                      question: widget.question,
-                      questionIndex: widget.questionIndex,
-                      language: lang,
-                      selected: selected,
-                      submitted: submitted,
-                      onSubmit: () => _submit(context, widget.questionIndex),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 10,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: _CardActionBar(
-                    isSaved: _isSaved,
-                    isSaving: _isSaving,
-                    onSave: _toggleSave,
-                    onExplain: _openExplanation,
-                    onShare: () => _onShare(lang),
-                  ),
-                ),
-              ),
-              if (_explanationOpen)
-                Positioned.fill(
-                  child: GestureDetector(
-                    onTap: _closeExplanation,
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      color: Colors.black.withValues(alpha: 0.35),
-                    ),
-                  ),
-                ),
-              if (_explanationOpen)
-                Positioned(
-                  top: 0,
-                  bottom: 0,
-                  right: 0,
-                  width: MediaQuery.of(context).size.width * 0.82,
-                  child: SlideTransition(
-                    position: _panelSlide,
-                    child: ClipRRect(
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(20),
-                        bottomLeft: Radius.circular(20),
-                        topRight: Radius.circular(24),
-                        bottomRight: Radius.circular(24),
-                      ),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: QuizColors.card.withValues(alpha: 0.97),
-                            borderRadius: const BorderRadius.only(
-                              topLeft: Radius.circular(20),
-                              bottomLeft: Radius.circular(20),
-                              topRight: Radius.circular(24),
-                              bottomRight: Radius.circular(24),
-                            ),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.08),
-                              width: 1,
-                            ),
-                          ),
-                          child: _ExplanationPanel(
-                            explanation: explanation,
-                            onClose: _closeExplanation,
-                            onNext: _closeAndNext,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+    return AnimatedBuilder(
+      animation: _feedbackController,
+      builder: (context, child) {
+        final scaleValue =
+            (submitted && isCorrect) ? _scaleAnimation.value : 1.0;
+        final shakeValue =
+            (submitted && !isCorrect) ? _shakeAnimation.value : 0.0;
+
+        return Transform.translate(
+          offset: Offset(shakeValue, 0.0),
+          child: Transform.scale(
+            scale: scaleValue,
+            child: child,
           ),
         );
       },
+      child: LayoutBuilder(
+        builder: (context, outerConstraints) {
+          return SizedBox(
+            height: outerConstraints.maxHeight,
+            width: outerConstraints.maxWidth,
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                    child: Container(
+                      height: outerConstraints.maxHeight,
+                      decoration: BoxDecoration(
+                        color: QuizColors.card.withValues(alpha: 0.72),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.06),
+                          width: 1,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: QuizColors.primary.withValues(alpha: 0.12),
+                            blurRadius: 28,
+                            spreadRadius: -8,
+                            offset: const Offset(0, 12),
+                          ),
+                        ],
+                      ),
+                      child: _ScrollableCardContent(
+                        question: widget.question,
+                        questionIndex: widget.questionIndex,
+                        language: lang,
+                        selected: selected,
+                        submitted: submitted,
+                        onSubmit: () => _submit(context, widget.questionIndex),
+                      ),
+                    ),
+                  ),
+                ),
+                if (submitted && isCorrect)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.04),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color: Colors.green.withValues(alpha: 0.2),
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  right: 10,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: _CardActionBar(
+                      isSaved: _isSaved,
+                      isSaving: _isSaving,
+                      onSave: _toggleSave,
+                      onExplain: _openExplanation,
+                      onShare: () => _onShare(lang),
+                    ),
+                  ),
+                ),
+                if (_explanationOpen)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      onTap: _closeExplanation,
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.35),
+                      ),
+                    ),
+                  ),
+                if (_explanationOpen)
+                  Positioned(
+                    top: 0,
+                    bottom: 0,
+                    right: 0,
+                    width: MediaQuery.of(context).size.width * 0.82,
+                    child: SlideTransition(
+                      position: _panelSlide,
+                      child: ClipRRect(
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(20),
+                          bottomLeft: Radius.circular(20),
+                          topRight: Radius.circular(24),
+                          bottomRight: Radius.circular(24),
+                        ),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: QuizColors.card.withValues(alpha: 0.97),
+                              borderRadius: const BorderRadius.only(
+                                topLeft: Radius.circular(20),
+                                bottomLeft: Radius.circular(20),
+                                topRight: Radius.circular(24),
+                                bottomRight: Radius.circular(24),
+                              ),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.08),
+                                width: 1,
+                              ),
+                            ),
+                            child: _ExplanationPanel(
+                              explanation: explanation,
+                              onClose: _closeExplanation,
+                              onNext: _closeAndNext,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -608,6 +1698,26 @@ class _ScrollableCardContent extends StatelessWidget {
     required this.onSubmit,
   });
 
+  Widget _buildCustomBadge(String label,
+      {required Color textColor, required Color bgColor}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: textColor,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -616,18 +1726,30 @@ class _ScrollableCardContent extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              PSBadge(
-                  label: question.year.toString(), color: QuizColors.secondary),
-              PSBadge(label: question.subject, color: QuizColors.textSecondary),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _buildCustomBadge(
+                    question.year.toString(),
+                    textColor: const Color(0xFFF59E0B),
+                    bgColor: const Color(0xFF2D1E10),
+                  ),
+                  _buildCustomBadge(
+                    question.subject,
+                    textColor: const Color(0xFF94A3B8),
+                    bgColor: const Color(0xFF1E293B),
+                  ),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 14),
           Text(
-            question.questionText(language),
+            QuestionTextFormatter.format(question.questionText(language)),
             style: const TextStyle(
               fontFamily: 'Poppins',
               fontSize: 12.0,
@@ -1113,8 +2235,17 @@ class _ResultCard extends StatelessWidget {
 }
 
 class _LimitOverlay extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
   final VoidCallback onTap;
-  const _LimitOverlay({required this.onTap});
+
+  const _LimitOverlay({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1144,14 +2275,14 @@ class _LimitOverlay extends StatelessWidget {
                           color: QuizColors.secondary.withValues(alpha: 0.14),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.lock_clock_rounded,
-                            color: QuizColors.secondary, size: 28),
+                        child:
+                            Icon(icon, color: QuizColors.secondary, size: 28),
                       ),
                       const SizedBox(height: 16),
-                      const Text(
-                        'Daily limit reached',
+                      Text(
+                        title,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontFamily: 'Poppins',
                           fontSize: 12.75,
                           fontWeight: FontWeight.w700,
@@ -1159,10 +2290,10 @@ class _LimitOverlay extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      const Text(
-                        'Tap to see when more questions unlock',
+                      Text(
+                        subtitle,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontFamily: 'Inter',
                           fontSize: 9.75,
                           color: QuizColors.textSecondary,
@@ -1177,6 +2308,91 @@ class _LimitOverlay extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AdCard extends StatefulWidget {
+  const _AdCard();
+
+  @override
+  State<_AdCard> createState() => _AdCardState();
+}
+
+class _AdCardState extends State<_AdCard> {
+  BannerAd? _bannerAd;
+  bool _isAdLoaded = false;
+  bool _adError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAd();
+  }
+
+  void _loadAd() {
+    final adUnitId = defaultTargetPlatform == TargetPlatform.iOS
+        ? 'ca-app-pub-3940256099942544/2934735716'
+        : 'ca-app-pub-3940256099942544/6300978111';
+
+    _bannerAd = BannerAd(
+      adUnitId: adUnitId,
+      size: AdSize.mediumRectangle,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (ad) {
+          setState(() {
+            _isAdLoaded = true;
+          });
+        },
+        onAdFailedToLoad: (ad, error) {
+          ad.dispose();
+          setState(() {
+            _adError = true;
+          });
+          print('Ad failed to load: $error');
+        },
+      ),
+    )..load();
+  }
+
+  @override
+  void dispose() {
+    _bannerAd?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: QuizColors.card,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+          width: 1,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: _adError
+          ? const Center(
+              child: Text(
+                'Sponsored Link',
+                style: TextStyle(color: QuizColors.textTertiary, fontSize: 13),
+              ),
+            )
+          : !_isAdLoaded
+              ? const Center(
+                  child: CircularProgressIndicator(color: Color(0xFF38BDF8)),
+                )
+              : ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: SizedBox(
+                    width: 300,
+                    height: 250,
+                    child: AdWidget(ad: _bannerAd!),
+                  ),
+                ),
     );
   }
 }
@@ -1303,7 +2519,7 @@ class _SwipeLimitSheetState extends State<_SwipeLimitSheet> {
                         ],
                       ),
                     ),
-                    Column(
+                    const Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(

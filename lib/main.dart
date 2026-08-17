@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:prepswipe/providers/community_quiz_provider.dart';
+import 'package:prepswipe/providers/timeline_settings_provider.dart';
 import 'package:provider/provider.dart';
 
 import 'firebase_options.dart';
@@ -12,7 +16,10 @@ import 'screens/login_screen.dart';
 import 'utils/app_theme.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  final widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+
+  await MobileAds.instance.initialize();
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -38,6 +45,9 @@ class PrepSwipeApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => QuizProvider()),
         ChangeNotifierProvider(create: (_) => AnalyticsProvider()),
+        ChangeNotifierProvider(
+          create: (_) => TimelineSettingsProvider()..load(),
+        ),
       ],
       child: MaterialApp(
         title: 'PrepSwipe',
@@ -49,72 +59,31 @@ class PrepSwipeApp extends StatelessWidget {
   }
 }
 
-class _AppRoot extends StatelessWidget {
+class _AppRoot extends StatefulWidget {
   const _AppRoot();
 
+  @override
+  State<_AppRoot> createState() => _AppRootState();
+}
+
+class _AppRootState extends State<_AppRoot> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
 
     if (auth.isLoading) {
-      return const _SplashScreen();
+      return const Scaffold(
+        backgroundColor: AppColors.bg,
+        body: SizedBox.shrink(),
+      );
     }
+
+    FlutterNativeSplash.remove();
 
     if (!auth.isAuthenticated) {
       return const LoginPage();
     }
 
     return const MainShell();
-  }
-}
-
-class _SplashScreen extends StatelessWidget {
-  const _SplashScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bg,
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.accent,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(
-                Icons.bolt_rounded,
-                color: Colors.white,
-                size: 40,
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'PrepSwipe',
-              style: TextStyle(
-                fontFamily: 'SpaceGrotesk',
-                fontSize: 28,
-                fontWeight: FontWeight.w800,
-                color: AppColors.textPrimary,
-                letterSpacing: -0.5,
-              ),
-            ),
-            const SizedBox(height: 32),
-            const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppColors.accent,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }

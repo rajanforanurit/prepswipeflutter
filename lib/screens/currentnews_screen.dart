@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:timeago/timeago.dart' as timeago;
 
 import 'package:prepswipe/models/currentaffair.dart';
 import 'package:prepswipe/utils/app_theme.dart';
@@ -204,11 +203,13 @@ class _CurrentNewsScreenState extends State<CurrentNewsScreen> {
                   children: [
                     Text(
                       item.title,
-                      style: GoogleFonts.poppins(
+                      style: const TextStyle(
+                        fontFamily: 'SpaceGrotesk',
                         fontSize: 14.5,
                         fontWeight: FontWeight.w600,
                         color: AppColors.textPrimary,
                         height: 1.3,
+                        letterSpacing: 0.2,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,

@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:developer';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
+import 'package:prepswipe/models/room_model.dart';
 import '../utils/constants.dart';
 
 class ApiService {
@@ -15,9 +17,9 @@ class ApiService {
   }
 
   Map<String, String> _headers(String? token) => {
-    'Content-Type': 'application/json',
-    if (token != null) 'Authorization': 'Bearer $token',
-  };
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      };
 
   Future<bool> healthCheck() async {
     try {
@@ -52,6 +54,7 @@ class ApiService {
 
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body) as Map<String, dynamic>;
+      print("que: $data");
       return List<Map<String, dynamic>>.from(data['questions'] ?? []);
     }
     throw Exception('Failed to fetch questions: ${res.statusCode}');
@@ -60,13 +63,17 @@ class ApiService {
   Future<List<Map<String, dynamic>>> getRandomQuestions({
     String collection = 'pcsquestions',
     String? exam,
+    String? subject,
+    int? year,
     int count = 20,
   }) async {
     final token = await _getToken();
     final uri = Uri.parse('${AppConstants.baseUrl}/questions/random').replace(
       queryParameters: {
         'collection': collection,
-        if (exam != null) 'exam': exam,
+        if (subject != null && subject.isNotEmpty) 'subject': subject,
+        if (year != null) 'year': year.toString(),
+        if (exam != null && exam.isNotEmpty) 'exam': exam,
         'count': count.toString(),
       },
     );
@@ -75,12 +82,43 @@ class ApiService {
         .get(uri, headers: _headers(token))
         .timeout(const Duration(seconds: 15));
 
+    //print("resbody: ${res.body}");
+    log("resbody: ${res.body}");
+
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body) as Map<String, dynamic>;
+      //print("randomdata: $data");
       return List<Map<String, dynamic>>.from(data['questions'] ?? []);
     }
     throw Exception('Failed to fetch random questions: ${res.statusCode}');
   }
+
+  // Future<List<Map<String, dynamic>>> getRandomQuestions({
+  //   String collection = 'pcsquestions',
+  //   String? exam,
+  //   String? subject,
+  //   int count = 20,
+  // }) async {
+  //   final token = await _getToken();
+  //   final uri = Uri.parse('${AppConstants.baseUrl}/questions/random').replace(
+  //     queryParameters: {
+  //       'collection': collection,
+  //       'subject': subject ?? '',
+  //       if (exam != null) 'exam': exam,
+  //       'count': count.toString(),
+  //     },
+  //   );
+
+  //   final res = await http
+  //       .get(uri, headers: _headers(token))
+  //       .timeout(const Duration(seconds: 15));
+
+  //   if (res.statusCode == 200) {
+  //     final data = jsonDecode(res.body) as Map<String, dynamic>;
+  //     return List<Map<String, dynamic>>.from(data['questions'] ?? []);
+  //   }
+  //   throw Exception('Failed to fetch random questions: ${res.statusCode}');
+  // }
 
   Future<void> submitAttempt({
     required dynamic questionId,
@@ -476,13 +514,13 @@ class ApiService {
     int count = 1,
   }) async {
     final token = await _getToken();
-    final uri = Uri.parse('${AppConstants.baseUrl}/did-you-know/random')
-        .replace(
-          queryParameters: {
-            if (subject != null) 'subject': subject,
-            'count': count.toString(),
-          },
-        );
+    final uri =
+        Uri.parse('${AppConstants.baseUrl}/did-you-know/random').replace(
+      queryParameters: {
+        if (subject != null) 'subject': subject,
+        'count': count.toString(),
+      },
+    );
 
     final res = await http
         .get(uri, headers: _headers(token))
@@ -574,13 +612,13 @@ class ApiService {
     int count = 5,
   }) async {
     final token = await _getToken();
-    final uri = Uri.parse('${AppConstants.baseUrl}/today-in-past/random')
-        .replace(
-          queryParameters: {
-            if (subject != null) 'subject': subject,
-            'count': count.toString(),
-          },
-        );
+    final uri =
+        Uri.parse('${AppConstants.baseUrl}/today-in-past/random').replace(
+      queryParameters: {
+        if (subject != null) 'subject': subject,
+        'count': count.toString(),
+      },
+    );
 
     final res = await http
         .get(uri, headers: _headers(token))
@@ -690,4 +728,222 @@ class ApiService {
       throw Exception('Failed to verify subscription: ${res.statusCode}');
     }
   }
+
+  // ** Community **
+
+  // Get active public rooms
+  Future<List<Room>> getActiveRooms({String? subject, String? examType}) async {
+    //String url = '${AppConstants.baseUrl}/rooms/active';
+    final token = await _getToken();
+    final uri = Uri.parse('${AppConstants.baseUrl}/rooms/active').replace(
+      queryParameters: {'subject': subject, 'examType': examType},
+    );
+
+    final res = await http
+        .get(uri, headers: _headers(token))
+        .timeout(const Duration(seconds: 15));
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      if (data['success'] == true) {
+        return (data['rooms'] as List).map((r) => Room.fromJson(r)).toList();
+      }
+    }
+    throw Exception(jsonDecode(res.body)['message'] ?? 'Failed to load rooms');
+  }
+
+  // Fetch rooms created by the user
+  Future<List<Room>> getCreatedRooms() async {
+    final token = await _getToken();
+    final response = await http.get(
+      Uri.parse('${AppConstants.baseUrl}/rooms/created'),
+      headers: _headers(token),
+    );
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      if (data['success'] == true) {
+        return (data['rooms'] as List).map((r) => Room.fromJson(r)).toList();
+      }
+    }
+    throw Exception(
+        jsonDecode(response.body)['message'] ?? 'Failed to load your rooms');
+  }
+
+  // Edit room details (Only accessible by host)
+  Future<Room> editRoom({
+    required String roomId,
+    String? title,
+    String? status,
+    int? maxParticipants,
+    double? marks,
+    double? negativeMarks,
+  }) async {
+    final token = await _getToken();
+    final response = await http.patch(
+      Uri.parse('${AppConstants.baseUrl}/rooms/$roomId'),
+      headers: _headers(token),
+      body: jsonEncode({
+        if (title != null) 'title': title,
+        if (status != null) 'status': status,
+        if (maxParticipants != null) 'maxParticipants': maxParticipants,
+        if (marks != null) 'marks': marks,
+        if (negativeMarks != null)
+          'negativeMarks':
+              negativeMarks, // Passing null here clears player limit constraints
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return Room.fromJson(data['room']);
+    }
+    throw Exception(
+        jsonDecode(response.body)['message'] ?? 'Failed to edit room details');
+  }
+
+// Fetch user's room participation history
+  Future<List<Room>> getRoomHistory() async {
+    final token = await _getToken();
+    final response = await http.get(
+      Uri.parse('${AppConstants.baseUrl}/rooms/history'),
+      headers: _headers(token),
+    );
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      if (data['success'] == true) {
+        return (data['rooms'] as List).map((r) => Room.fromJson(r)).toList();
+      }
+    }
+    throw Exception(
+        jsonDecode(response.body)['message'] ?? 'Failed to load history');
+  }
+
+  // Create a room
+  Future<Map<String, dynamic>> createRoom({
+    required String title,
+    String? examType,
+    String? subject,
+    String collectionName = 'pcsquestions',
+    String questionSelection = 'random',
+    int questionCount = 10,
+    List<dynamic>? specifiedQuestionIds,
+    bool isPrivate = false,
+    String? password,
+    int maxParticipants = 4,
+    double marks = 1.0,
+    double negativeMarks = 0.0,
+  }) async {
+    final token = await _getToken();
+    final response = await http.post(
+      Uri.parse('${AppConstants.baseUrl}/rooms/create'),
+      headers: _headers(token),
+      body: jsonEncode({
+        'title': title,
+        'examType': examType,
+        'subject': subject,
+        'collectionName': collectionName,
+        'questionSelection': questionSelection,
+        'questionCount': questionCount,
+        if (specifiedQuestionIds != null)
+          'specifiedQuestionIds': specifiedQuestionIds,
+        'isPrivate': isPrivate,
+        if (password != null) 'password': password,
+        'maxParticipants': maxParticipants,
+        'marks': marks,
+        'negativeMarks': negativeMarks,
+      }),
+    );
+
+    if (response.statusCode == 201) {
+      final data = jsonDecode(response.body);
+      return {
+        'room': Room.fromJson(data['room']),
+        'shareLink': data['shareLink'],
+      };
+    }
+    throw Exception(
+        jsonDecode(response.body)['message'] ?? 'Failed to create room');
+  }
+
+  // Join a room
+  Future<Map<String, dynamic>> joinRoom({
+    required String roomId,
+    String? password,
+  }) async {
+    final token = await _getToken();
+    final response = await http.post(
+      Uri.parse('${AppConstants.baseUrl}/rooms/join'),
+      headers: _headers(token),
+      body: jsonEncode({
+        'roomId': roomId,
+        if (password != null) 'password': password,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final room = Room.fromJson(data['room']);
+      final List<RoomQuestion> questions = (data['questions'] as List)
+          .map((q) => RoomQuestion.fromJson(q))
+          .toList();
+      return {'room': room, 'questions': questions};
+    }
+    throw Exception(
+        jsonDecode(response.body)['message'] ?? 'Failed to join room');
+  }
+
+  // Submit test
+  Future<List<RoomParticipant>> submitRoomResults({
+    required String roomId,
+    required List<QuizAttempt> attempts,
+  }) async {
+    final token = await _getToken();
+    final response = await http.post(
+      Uri.parse('${AppConstants.baseUrl}/rooms/$roomId/submit'),
+      headers: _headers(token),
+      body: jsonEncode({
+        'attempts': attempts.map((a) => a.toJson()).toList(),
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return (data['leaderboard'] as List)
+          .map((p) => RoomParticipant.fromJson(p))
+          .toList();
+    }
+    throw Exception(
+        jsonDecode(response.body)['message'] ?? 'Failed to submit quiz');
+  }
+
+  // Fetch room details / live leaderboard
+  Future<Room> getRoomDetails(String roomId) async {
+    final token = await _getToken();
+    final response = await http.get(
+      Uri.parse('${AppConstants.baseUrl}/rooms/$roomId'),
+      headers: _headers(token),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return Room.fromJson(data['room']);
+    }
+    throw Exception(
+        jsonDecode(response.body)['message'] ?? 'Failed to fetch room');
+  }
+
+  // Delete a room (Requires host authorization)
+  Future<void> deleteRoom(String roomId) async {
+    final token = await _getToken();
+    final response = await http.delete(
+      Uri.parse('${AppConstants.baseUrl}/rooms/$roomId'),
+      headers: _headers(token),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+          jsonDecode(response.body)['message'] ?? 'Failed to delete room');
+    }
+  }
+
+  // ** Community **
 }
